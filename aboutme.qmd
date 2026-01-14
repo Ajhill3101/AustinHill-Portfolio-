@@ -2,6 +2,20 @@
 title: "About me"
 ---
 
-Add some text and a figure describing myself.
+![](images/Selfie%20for%20UGA%20ID%20Card%20cropped-3.jpg)
 
-For details, see the instructions. 
+Hi everyone! My name is Austin Hill. I’m from Jackson County, Georgia, and grew up near the city of Commerce. I completed my Bachelor of Science at the University of Georgia, majoring in Poultry Science with a minor in Avian Biology. During my undergraduate studies I gained hands on research experience at the USDA Southeastern Poultry Research Center, which sparked my interest in avian infectious diseases and applied research.
+
+After graduating, I was fortunate to be offered the opportunity to pursue a PhD with support from the USDA and my mentor at UGA, Dr. Grazieli Maboni. I am now in my third year of the Comparative Biomedical Sciences program, where my research focuses on avian reovirus adaptation, immunomodulatory effects, and vaccine development. When I’m not in the lab (which is rare), I enjoy playing basketball, cheering for the Dawgs, and going hiking. I also love exploring new restaurants around Athens and listening to a wide range of podcasts.
+
+Here is an image of my virus that I work with for my research!
+
+![](images/Screenshot%202025-11-16%20141324.png)
+
+**Data Analysis Background**
+
+So far, the extent of my data analysis curriculum has been limited. I have taken courses like IDIS 8080L, which focused more on sequencing and biological analysis, and I recently completed BIOS 7010e, which I believe will be helpful for this class. I am particularly interested in taking this course because I hope to become more familiar with R and gain experience using analytical software that I can apply directly to my own research.
+
+**Fun Link!**
+
+Here is a fun [link](https://www.instagram.com/errantscience/?hl=en) to an Instagram page that has fun science humor, and even some data analysis memes.

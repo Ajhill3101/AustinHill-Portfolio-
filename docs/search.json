@@ -11,13 +11,13 @@
     "href": "aboutme.html",
     "title": "About me",
     "section": "",
-    "text": "Add some text and a figure describing myself.\nFor details, see the instructions."
+    "text": "Hi everyone! My name is Austin Hill. I’m from Jackson County, Georgia, and grew up near the city of Commerce. I completed my Bachelor of Science at the University of Georgia, majoring in Poultry Science with a minor in Avian Biology. During my undergraduate studies I gained hands on research experience at the USDA Southeastern Poultry Research Center, which sparked my interest in avian infectious diseases and applied research.\nAfter graduating, I was fortunate to be offered the opportunity to pursue a PhD with support from the USDA and my mentor at UGA, Dr. Grazieli Maboni. I am now in my third year of the Comparative Biomedical Sciences program, where my research focuses on avian reovirus adaptation, immunomodulatory effects, and vaccine development. When I’m not in the lab (which is rare), I enjoy playing basketball, cheering for the Dawgs, and going hiking. I also love exploring new restaurants around Athens and listening to a wide range of podcasts.\nHere is an image of my virus that I work with for my research!\n\nData Analysis Background\nSo far, the extent of my data analysis curriculum has been limited. I have taken courses like IDIS 8080L, which focused more on sequencing and biological analysis, and I recently completed BIOS 7010e, which I believe will be helpful for this class. I am particularly interested in taking this course because I hope to become more familiar with R and gain experience using analytical software that I can apply directly to my own research.\nFun Link!\nHere is a fun link to an Instagram page that has fun science humor, and even some data analysis memes."
   },
   {
     "objectID": "index.html",
     "href": "index.html",
-    "title": "My website and data analysis portfolio",
+    "title": "Austin’s website and data analysis portfolio",
     "section": "",
-    "text": "Feel free to change the text below any way you want 😁!\n\nHello\n\nAnd hello again\nWelcome to my website and data analysis portfolio.\n\nPlease use the Menu Bar above to look around.\nHave fun!"
+    "text": "Welcome to my website and data analysis portfolio.\nPlease use the Menu Bar above to look around."
   }
 ]
