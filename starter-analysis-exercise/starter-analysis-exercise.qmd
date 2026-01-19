@@ -1,12 +1,10 @@
 ---
-title: "Data Analysis Introduction Austin Hill"
+# Data Analysis Introduction Austin Hill
 ---
 
 # Installing package
 
-```{r}
-install.packages("dslabs")
-```
+# In R Console type in Install.package ("dslabs") DO NOT RUN IN QUARTO CAUSES ERROR WHEN RENDERING.
 
 # load dslabs package
 
@@ -26,9 +24,7 @@ class(gapminder)
 
 # Install tidyverse package
 
-```{r}
-install.packages("tidyverse")
-```
+Install tidyverse in R console. Not directly into Quarto.
 
 # Adding the dplyr that is part of tidyverse
 
@@ -98,8 +94,6 @@ ggplot(Africa_infant_life, aes(x = infant_mortality, y = life_expectancy)) +
   theme_minimal()
 ```
 
-![](images/paste-2.png)
-
 # Life expectancy vs population (log-scaled x-axis) plot
 
 ```{r}
@@ -113,8 +107,6 @@ ggplot(Africa_pop_life, aes(x = population, y = life_expectancy)) +
   ) +
   theme_minimal()
 ```
-
-![](images/paste-3.png)
 
 # The plot life expectancy vs population that has multiple overlapping sets seems to be from multiple differnt years of data collection.
 
@@ -157,8 +149,6 @@ ggplot(africa_2000, aes(x = population, y = life_expectancy)) +
   theme_minimal()
 ```
 
-![](images/paste-4.png)
-
 # plot for africa 2000 Infant Mortality vs life Expectancy
 
 ```{r}
@@ -171,8 +161,6 @@ ggplot(africa_2000, aes(x = infant_mortality, y = life_expectancy)) +
   ) +
   theme_minimal()
 ```
-
-![](images/paste-5.png)
 
 # Running linear regression on life expectancy and infant mortality plot
 
