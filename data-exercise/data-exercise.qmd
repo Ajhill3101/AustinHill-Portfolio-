@@ -1,0 +1,205 @@
+---
+---
+############################################
+# Data exercise 
+# Option 2: Synthetic Data Generation and Exploration
+# Author: Austin Hill
+# Purpose: 
+# 1. Generate a synthetic dataset of individuals
+# 2. Build in a known association (height and NBA probability)
+# 3. Explore the data visually and with tables
+# 4. Fit simple models to recover the association
+############################################
+
+```{r}
+# Load required libraries
+library(tidyverse)
+```
+
+############################################
+# 1. Generate Synthetic Data
+############################################
+
+```{r}
+# Set a seed so results are reproducible
+# This ensures the same random data is created every time
+set.seed(123)
+```
+
+```{r}
+# Number of individuals
+n <- 100
+```
+
+```{r}
+# Create a synthetic dataset
+synthetic_data <- tibble(
+  
+  # Height in feet:
+  # heights range from 5 to 7 feet
+  height_ft = runif(n, min = 5, max = 7),
+  
+  # NBA probability (0 to 1 initially):
+  # Taller people are made in this data to have a higher chance
+  # creating a linear relationship plus some random noise
+  nba_prob = 0.05 + 0.4 * (height_ft - 5) +   
+ # height effect
+rnorm(n, mean = 0, sd = 0.05)
+)
+# Make sure probabilities stay between 0 and 1
+synthetic_data <- synthetic_data %>%
+  mutate(
+    nba_prob = pmin(pmax(nba_prob, 0), 1),
+  # Convert probability to percentage (0–100)
+    nba_percent = nba_prob * 100
+  )
+```
+
+```{r}
+# View the first few rows
+head(synthetic_data)
+```
+
+############################################
+# 2. Explore the Data with Tables
+############################################
+
+```{r}
+# Summary statistics for height and NBA probability
+summary(synthetic_data)
+
+```
+
+```{r}
+# Create a simple table showing average NBA chance by height group
+synthetic_data %>%
+  mutate(
+    height_group = case_when(
+      height_ft < 5.75 ~ "Shorter",
+      height_ft < 6.5  ~ "Medium",
+      TRUE             ~ "Taller"
+       )
+  ) %>%
+  group_by(height_group) %>%
+  summarise(
+    avg_height = mean(height_ft),
+    avg_nba_percent = mean(nba_percent)
+  )
+```
+
+############################################
+# 3. Visualize the Data with ggplot2
+############################################
+
+```{r}
+# Scatter plot of height vs NBA probability
+ggplot(synthetic_data, aes(x = height_ft, y = nba_percent)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Height vs Chance of Making the NBA",
+    x = "Height (feet)",
+    y = "Chance of Making the NBA (%)"
+  )
+```
+
+```{r}
+# Histogram of height
+ggplot(synthetic_data, aes(x = height_ft)) +
+  geom_histogram(bins = 20) +
+  labs(
+    title = "Distribution of Height",
+    x = "Height (feet)",
+    y = "Person Count"
+  )
+
+# Histogram of NBA probability
+ggplot(synthetic_data, aes(x = nba_percent)) +
+  geom_histogram(bins = 20) +
+  labs(
+    title = "Distribution of NBA Probability",
+    x = "Chance of Making the NBA (%)",
+    y = "Person Count"
+  )
+```
+############################################
+# 4. Fit Simple Models
+############################################
+
+```{r}
+# Linear model:
+# Predict NBA percentage using height
+lm_model <- lm(nba_percent ~ height_ft, data = synthetic_data)
+# View model results
+summary(lm_model)
+```
+
+# Interpretation:
+# The coefficient for height_ft is positive,
+# this makes sense because I built the data so taller people have a higher chance.
+
+############################################
+# 5. Logistic Model 
+############################################
+
+```{r}
+# Creating a binary outcome:
+# Did the person make the NBA? (Yes/No)
+# made it a 50/50 shot randomly generated using the prob. data 
+synthetic_data <- synthetic_data %>%
+  mutate(
+    made_nba = rbinom(n, size = 1, prob = nba_prob)
+  )
+
+# Fit a logistic regression model
+glm_model <- glm(made_nba ~ height_ft,data = synthetic_data,family = binomial)
+
+# View model results
+summary(glm_model)
+# The Big Takeaway: Height Matters (A Lot) in making the NBA. 
+```
+############################################
+# 6. Compare Model Fits
+############################################
+
+```{r}
+# Plot predicted probabilities from the logistic model
+synthetic_data %>%
+  mutate(
+    predicted_prob = predict(glm_model, type = "response")
+  ) %>%
+  ggplot(aes(x = height_ft, y = predicted_prob)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(
+    title = "Predicted Probability of Making the NBA by Height",
+    x = "Height (feet)",
+    y = "Predicted Probability"
+  )
+```
+############################################
+# 6. Compare Model Fits
+############################################
+
+```{r}
+# Plot predicted probabilities from the logistic model
+synthetic_data %>%
+  mutate(
+    predicted_prob = predict(glm_model, type = "response")
+  ) %>%
+  ggplot(aes(x = height_ft, y = predicted_prob)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(
+    title = "Predicted Probability of Making the NBA by Height",
+    x = "Height (feet)",
+    y = "Predicted Probability"
+  )
+
+```
+# Overall Notes:
+# - The linear model captures the overall trend
+# - The logistic model is more appropriate for a yes/no outcome
+# - Both models successfully recover the association that taller individuals have a higher chance of making the NBA
+
+# Disclaimer: AI was used to assist with this excercise 
