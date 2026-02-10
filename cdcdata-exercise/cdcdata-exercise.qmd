@@ -1,0 +1,270 @@
+---
+title: "cdcdata-exercise"
+format: html
+---
+*Weekly Respiratory Syncytial Virus (RSV) Vaccination Coverage among Pregnant Women by Race and Ethnicity*
+
+Citation: National Center for Immunization and Respiratory Diseases, US Centers for Disease Control and Prevention. Weekly RSV Vaccination Coverage, Pregnant Women 18-49 Years Old, By Race and Ethnicity, United States
+
+Data Description: This dataset describes weekly RSV vaccination coverage among pregnant women ages 18–49 in the United States, as monitored by the National Center for Immunization and Respiratory Diseases (NCIRD) using data from the Vaccine Safety Datalink (VSD). The data begin in late September 2023, and track the proportion of eligible pregnant women who received the vaccine over time. Vaccination coverage is calculated using a denominator of pregnant women who reached at least 32 weeks of gestation since September 22, 2023, including some who may have been outside the recommended 32–36 week window. The numerator includes women who had received an RSV vaccine by each weekly reporting date. 
+
+Data Source: https://data.cdc.gov/Pregnancy-Vaccination/Weekly-Respiratory-Syncytial-Virus-RSV-Vaccination/g4jn-64pd/about_data
+
+
+```{r}
+# Load required packages
+library(readr)    # for read_csv() and parse_number()
+library(dplyr)    # for data manipulation (mutate, select, filter, etc.)
+library(lubridate) # for working with dates
+library(janitor)  # for cleaning column names
+```
+
+```{r}
+# Read the data
+rsv_data <- read_csv("Weekly_Respiratory_Syncytial_Virus_(RSV)_Vaccination_Coverage_among_Pregnant_Women_by_Race_and_Ethnicity_20260209.csv")
+# Preview the data 
+head(rsv_data)
+
+# View the structure of the dataset (column names, types, example values)
+glimpse(rsv_data)
+
+# Look at the first few rows
+head(rsv_data)
+
+# Display column names explicitly
+colnames(rsv_data)
+
+# Generate basic summary statistics for each column
+summary(rsv_data)
+
+# Count missing values in each column
+colSums(is.na(rsv_data))
+```
+
+```{r}
+# Convert column names to snake_case and remove spaces/special characters
+# This should make them easier to reference in code
+rsv_data <- rsv_data %>%
+  clean_names()
+# check data
+head(rsv_data)
+```
+
+```{r}
+# Convert the week_ending_date column from character text
+# (e.g., "2023 Sep 30 12:00:00 AM") to a datetime object
+rsv_data <- rsv_data %>%
+  mutate(
+    week_ending_date = as.POSIXct(
+      week_ending_date,
+      format = "%Y %b %d %I:%M:%S %p",
+      tz = "UTC"
+    )
+  )
+# remove the time component and keep only the date
+rsv_data <- rsv_data %>%
+  mutate(
+    week_ending_date = as.Date(week_ending_date)
+  )
+  # check data 
+  head(rsv_data)
+```
+
+```{r}
+# View unique race and ethnicity categories
+# helps identify inconsistencies or formatting issues
+distinct(rsv_data, race_and_ethnicity)
+# Trim extra whitespace and remove "NH" (Non-Hispanic)
+# NH does not add anything to the data set, I think it is not needed in the data set.
+rsv_data <- rsv_data %>%
+  mutate(
+    race_and_ethnicity = str_trim(race_and_ethnicity),
+    race_and_ethnicity = str_replace(race_and_ethnicity, ", NH$", "")
+  )
+# check data
+head(rsv_data)
+```
+
+```{r}
+# Check the range of percent values to ensure they fall between 0 and 100
+range(rsv_data$percent, na.rm = TRUE)
+# Inspect rows where percent is zero
+# look to identifying early reporting periods or suppressed data
+rsv_data %>%
+  filter(percent == 0) %>%
+  count(week_ending_date)
+# check data
+head(rsv_data)
+```
+
+```{r}
+# Check whether there are multiple rows for the same week and race/ethnicity combination
+rsv_data %>%
+  count(week_ending_date, race_and_ethnicity) %>%
+  filter(n > 1)
+```
+
+```{r}
+# Check how many unique values figure_id has
+# This column contains no useful information
+n_distinct(rsv_data$figure_id)
+# Remove figure_id since it is constant across all rows
+rsv_data <- rsv_data %>%
+  select(-figure_id)
+
+```
+
+```{r}
+# check data
+head(rsv_data)
+```
+
+```{r}
+# Get a overview of variable types
+glimpse(rsv_data)
+```
+```{r}
+# Count and percent by race/ethnicity
+race_summary <- rsv_data %>%
+  count(race_and_ethnicity) %>%
+  mutate(
+    percent = n / sum(n) * 100
+  ) %>%
+  arrange(desc(percent))
+```
+
+```{r}
+# Load in a package needed
+library(ggplot2)
+# This code is to see if observations are distributed evenly across racial and ethnic groups
+ggplot(race_summary, aes(x = race_and_ethnicity, y = percent)) +
+  geom_col() +
+  labs(
+    title = "Distribution of Observations by Race and Ethnicity",
+    x = "Race and Ethnicity",
+    y = "Percent of Observations"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Shows each group contributing a similar number of weekly observations over the study period
+```
+
+```{r}
+# To see the data date range and total number of weeks
+rsv_data %>%
+  summarise(
+    start_date = min(week_ending_date, na.rm = TRUE),
+    end_date   = max(week_ending_date, na.rm = TRUE),
+    n_weeks    = n_distinct(week_ending_date)
+  )
+```
+
+```{r}
+# this code is to see if any weeks were skipped in the study with observations
+ggplot(rsv_data, aes(x = week_ending_date)) +
+  geom_histogram(bins = 30) +
+  labs(
+    title = "Distribution of Weekly Reporting Dates",
+    x = "Week Ending Date",
+    y = "Number of Observations"
+  ) +
+  theme_minimal()
+# the histogram confirms regular weekly reporting and no major gaps.
+```
+
+```{r}
+# Distribution check of RSV vaccination coverage in a histogram
+ggplot(rsv_data, aes(x = percent)) +
+  geom_histogram(bins = 30) +
+  labs(
+    title = "Distribution of RSV Vaccination Coverage (%)",
+    x = "Vaccination Coverage (%)",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Density check of RSV vaccination coverage
+ggplot(rsv_data, aes(x = percent)) +
+  geom_density() +
+  labs(
+    title = "Density of RSV Vaccination Coverage (%)",
+    x = "Vaccination Coverage (%)",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Numerical summary of percent vaccination coverage data
+percent_summary <- rsv_data %>%
+  summarise(
+    mean_percent = mean(percent, na.rm = TRUE),
+    sd_percent   = sd(percent, na.rm = TRUE),
+    min_percent  = min(percent, na.rm = TRUE),
+    max_percent  = max(percent, na.rm = TRUE)
+  )
+ # Overall RSV vaccination coverage percentages appear approximately slightly skewed, with a mean of 7.82% and a standard deviation of 6.97%
+```
+
+```{r}
+# Numerical summary of percent vaccination coverage data by Race/ethnicity 
+rsv_data %>%
+  group_by(race_and_ethnicity) %>%
+  summarise(
+    mean_percent = mean(percent, na.rm = TRUE),
+    sd_percent   = sd(percent, na.rm = TRUE),
+    min_percent  = min(percent, na.rm = TRUE),
+    max_percent  = max(percent, na.rm = TRUE),
+    n            = n()
+  ) %>%
+  arrange(desc(mean_percent))
+```
+
+```{r}
+# distribution of weekly total number of pregnant women (demoninator)
+# Count= Number of observations with that denominator size
+ggplot(rsv_data, aes(x = denominator)) +
+  geom_histogram(bins = 30) +
+  labs(
+    title = "Distribution of Weekly Denominators",
+    x = "Number of Pregnant Women",
+    y = "Count"
+  ) +
+  theme_minimal()
+# as you can see this data is right skewed
+```
+
+```{r}
+# Numerical summary of denominators data
+rsv_data %>%
+  summarise(
+    mean_denom = mean(denominator, na.rm = TRUE),
+    sd_denom   = sd(denominator, na.rm = TRUE),
+    median_denom = median(denominator, na.rm = TRUE),
+    min_denom  = min(denominator, na.rm = TRUE),
+    max_denom  = max(denominator, na.rm = TRUE)
+  )
+```
+
+```{r}
+# Vaccination coverage over time by race/ethnicity
+ggplot(
+  rsv_data,
+  aes(
+    x = week_ending_date,
+    y = percent,
+    color = race_and_ethnicity
+  )
+) +
+  geom_line() +
+  labs(
+    title = "Weekly RSV Vaccination Coverage by Race and Ethnicity",
+    x = "Date",
+    y = "Vaccination Coverage (%)",
+    color = "Race and Ethnicity"
+  ) +
+  theme_minimal()
+# Each line represents weekly RSV vaccination coverage for a specific race/ethnicity group, with colors distinguishing groups.
+```
