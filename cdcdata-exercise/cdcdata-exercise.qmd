@@ -13,10 +13,12 @@ Data Source: https://data.cdc.gov/Pregnancy-Vaccination/Weekly-Respiratory-Syncy
 
 ```{r}
 # Load required packages
-library(readr)    # for read_csv() and parse_number()
-library(dplyr)    # for data manipulation (mutate, select, filter, etc.)
-library(lubridate) # for working with dates
-library(janitor)  # for cleaning column names
+library(readr)    
+library(dplyr)    
+library(lubridate) 
+library(janitor)  
+library(stringr)
+library(ggplot2)
 ```
 
 ```{r}
@@ -134,8 +136,6 @@ race_summary <- rsv_data %>%
 ```
 
 ```{r}
-# Load in a package needed
-library(ggplot2)
 # This code is to see if observations are distributed evenly across racial and ethnic groups
 ggplot(race_summary, aes(x = race_and_ethnicity, y = percent)) +
   geom_col() +
