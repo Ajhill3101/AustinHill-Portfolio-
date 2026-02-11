@@ -1,6 +1,5 @@
 ---
 title: "cdcdata-exercise"
-format: html
 ---
 *Weekly Respiratory Syncytial Virus (RSV) Vaccination Coverage among Pregnant Women by Race and Ethnicity*
 
