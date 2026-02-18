@@ -54,6 +54,7 @@ head(rsv_data)
 ```{r}
 # Convert the week_ending_date column from character text
 # (e.g., "2023 Sep 30 12:00:00 AM") to a datetime object
+Sys.setlocale("LC_TIME", "C")
 rsv_data <- rsv_data %>%
   mutate(
     week_ending_date = as.POSIXct(
@@ -150,6 +151,7 @@ ggplot(race_summary, aes(x = race_and_ethnicity, y = percent)) +
 
 ```{r}
 # To see the data date range and total number of weeks
+
 rsv_data %>%
   summarise(
     start_date = min(week_ending_date, na.rm = TRUE),
@@ -267,3 +269,230 @@ ggplot(
   theme_minimal()
 # Each line represents weekly RSV vaccination coverage for a specific race/ethnicity group, with colors distinguishing groups.
 ```
+
+
+# Synthetic Data Generation
+# This section contributed by Liang Lai.
+
+## AI Prompt Used
+Write R code to generate a synthetic dataset with N = 171 observations that mimics a balanced weekly panel of RSV vaccination coverage by race/ethnicity. Create a dataframe named synthetic_data with the following columns: week_ending_date, race_and_ethnicity, percent, denominator, date_order, and race_sort_order. Use these assumptions based on the descriptive patterns: 
+Panel structure / balance: There are 19 weekly dates (consecutive week-ending dates), and 9 race/ethnicity groups. Create an approximately balanced panel so that each week has about 9 observations (one per group), totaling 171 rows. 
+Race_and_ethnicity: a categorical variable with 9 groups (e.g., American Indian/Alaska Native, Asian, Black, Hispanic/Latino, Multiple/Other, Native Hawaiian/Pacific Islander, Overall, Unknown, White). Keep group sizes roughly equal. 
+Week_ending_date: weekly dates spanning about Oct to early Feb (19 weeks). date_order: an integer index 1–19 matching the chronological order of week_ending_date (repeat each value 9 times). 
+Race_sort_order: an integer index 1–9 that assigns a fixed ordering to the race/ethnicity groups (repeat across weeks). 
+percent (vaccination coverage): bounded to 0–25, with a strong upward time trend (near 0 in early weeks, increasing rapidly around mid-period, reaching roughly 10–25 by the end). Add group-specific offsets so groups diverge in later weeks. Ensure the distribution is right-skewed with many near-zero values (allow some exact zeros in early weeks). 
+Denominator: a strictly positive count variable that is strongly right-skewed with a long tail (most values small, a few very large up to tens of thousands). Use a log-normal distribution (rounded to integers).
+
+## Code for Synthetic Data
+```{r}
+set.seed(20260211)
+
+# -----------------------------
+# 1) Panel structure
+# -----------------------------
+n_weeks  <- 19
+n_groups <- 9
+
+race_levels <- c(
+  "American Indian/Alaska Native",
+  "Asian",
+  "Black",
+  "Hispanic/Latino",
+  "Multiple/Other",
+  "Native Hawaiian/Pacific Islander",
+  "Overall",
+  "Unknown",
+  "White"
+)
+
+start_date <- as.Date("2025-10-04")                 # week-ending date (e.g., Saturday)
+week_dates <- seq.Date(start_date, by = "7 days", length.out = n_weeks)
+
+date_map <- tibble(
+  week_ending_date = week_dates,
+  date_order       = 1:n_weeks
+)
+
+race_map <- tibble(
+  race_and_ethnicity = factor(race_levels, levels = race_levels),
+  race_sort_order    = 1:n_groups
+)
+
+panel <- tidyr::expand_grid(
+  date_map, 
+  race_map
+) %>%
+  arrange(date_order, race_sort_order)
+
+stopifnot(nrow(panel) == 171)
+
+# -----------------------------
+# 2) Denominator: log-normal, long right tail (integers, strictly positive)
+# -----------------------------
+denom_raw <- rlnorm(n = nrow(panel), meanlog = 6.0, sdlog = 1.3)
+denominator <- pmax(1L, as.integer(round(denom_raw)))
+
+# -----------------------------
+# 3) Percent: bounded [0, 25], strong upward time trend, right-skew, many near-zero
+# -----------------------------
+t <- panel$date_order
+
+trend <- 25 / (1 + exp(-0.65 * (t - 11)))  # logistic rise (0..~25)
+
+group_offsets <- c(
+  `American Indian/Alaska Native`       = -1.8,
+  `Asian`                                =  2.0,
+  `Black`                                = -0.8,
+  `Hispanic/Latino`                      =  0.4,
+  `Multiple/Other`                       =  0.2,
+  `Native Hawaiian/Pacific Islander`     = -1.2,
+  `Overall`                              =  0.8,
+  `Unknown`                              = -2.5,
+  `White`                                =  1.4
+)
+
+offset_vec <- unname(group_offsets[as.character(panel$race_and_ethnicity)])
+div_wt <- (t / n_weeks)^1.7
+
+noise_pos <- rgamma(nrow(panel), shape = 0.8, scale = 1.2)  # right-skew
+noise_sym <- rnorm(nrow(panel), mean = 0, sd = 0.7)
+
+# more exact zeros early, fewer later
+p_zero <- plogis(-3.0 + 0.55 * (6 - t))
+
+base <- trend + div_wt * offset_vec + 0.7 * noise_pos + noise_sym
+
+percent <- ifelse(runif(nrow(panel)) < p_zero, 0, base)
+percent <- pmin(25, pmax(0, percent))
+percent <- round(percent, 1)
+
+# -----------------------------
+# 4) Final dataframe
+# -----------------------------
+synthetic_data <- panel %>%
+  mutate(
+    percent = percent,
+    denominator = denominator
+  ) %>%
+  select(
+    week_ending_date,
+    race_and_ethnicity,
+    percent,
+    denominator,
+    date_order,
+    race_sort_order
+  )
+```
+
+# EDA for synthetic_data
+
+```{r}
+# Each week should have 9 observations (one per group)
+synthetic_data %>%
+  count(week_ending_date) %>%
+  arrange(week_ending_date)
+```
+
+
+```{r}
+# Distribution of observations by race/ethnicity (should be even)
+race_summary_sy <- synthetic_data %>%
+  count(race_and_ethnicity) %>%
+  mutate(percent_obs = n / sum(n) * 100) %>%
+  arrange(desc(percent_obs))
+
+ggplot(race_summary_sy, aes(x = race_and_ethnicity, y = percent_obs)) +
+  geom_col() +
+  labs(
+    title = "Distribution of Observations by Race and Ethnicity",
+    x = "Race and Ethnicity",
+    y = "Percent of Observations"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+# check percent
+# Check bounds (should be within 0 to 25)
+range(synthetic_data$percent, na.rm = TRUE)
+
+# Inspect how many zeros (should be many in early weeks)
+mean(synthetic_data$percent == 0)
+
+# Histogram (right-skew with many near-zero values)
+ggplot(synthetic_data, aes(x = percent)) +
+  geom_histogram(bins = 30) +
+  labs(
+    title = "Distribution of RSV Vaccination Coverage (Percent)",
+    x = "Vaccination Coverage (Percent)",
+    y = "Count"
+  ) +
+  theme_minimal()
+
+# Density plot
+ggplot(synthetic_data, aes(x = percent)) +
+  geom_density() +
+  labs(
+    title = "Density of RSV Vaccination Coverage (Percent)",
+    x = "Vaccination Coverage (Percent)",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+# Percent summary by race/ethnicity
+synthetic_data %>%
+  group_by(race_and_ethnicity, race_sort_order) %>%
+  summarise(
+    mean_percent = mean(percent, na.rm = TRUE),
+    sd_percent   = sd(percent, na.rm = TRUE),
+    min_percent  = min(percent, na.rm = TRUE),
+    max_percent  = max(percent, na.rm = TRUE),
+    n            = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(race_sort_order)
+```
+
+
+```{r}
+# distribution of weekly total number of pregnant women (demoninator)
+# Count= Number of observations with that denominator size
+ggplot(synthetic_data, aes(x = denominator)) +
+  geom_histogram(bins = 30) +
+  labs(
+    title = "Distribution of Weekly Denominators",
+    x = "Number of Pregnant Women",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+# Vaccination coverage over time by race/ethnicity
+ggplot(
+  synthetic_data,
+  aes(
+    x = week_ending_date,
+    y = percent,
+    color = race_and_ethnicity
+  )
+) +
+  geom_line() +
+  labs(
+    title = "Weekly RSV Vaccination Coverage by Race and Ethnicity",
+    x = "Date",
+    y = "Vaccination Coverage (%)",
+    color = "Race and Ethnicity"
+  ) +
+  theme_minimal()
+```
+
+# Summary
+I use AI to generate a synthetic dataset with 171 rows. Using this prompt can give similar sample size.
+Compared with the original dataset, my synthetic data matches the overall structure (a balanced 19-week × 9-group panel, 171 rows) and reproduces the main time trend：coverage starts near zero and increases steadily toward the end of the period.
+However, in the density plot of coverage (percent), the synthetic data places more mass near 22–25%, reflecting the strong logistic trend and the enforced upper bound. And in the line plot of weekly coverage by race/ethnicity (Synthetic vs Original), the synthetic trajectories are more tightly clustered and tend to converge near the upper bound (~25%) in later weeks.
