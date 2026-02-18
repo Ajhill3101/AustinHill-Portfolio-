@@ -1,0 +1,317 @@
+---
+title: "Presenting Results"
+---
+# Presenting data exercise
+
+This data I will be using for this exercise is from a FiveThirtyEight Titled "The Most Common Unisex Names In America: Is Yours One Of Them?". The data contains the over 900 names given to each sex at least one-third of the time and with a minimum of 100 people. 
+It has the following variables:
+name: First names from the Social Security Administration
+total: Total number of living Americans with the name
+male_share	Percentage of people with the name who are male
+female_share: Percentage of people with the name who are female
+gap: Gap between male_share and female_share
+
+# Recreating the Graph 
+Prompt in ChatGPT: 
+Can you recreate an graph that I provide in a screenshot and Provide the raw data?
+I want you to help me recreate it in R through positron using code. Can you do this using ggplot2 and friends?
+Here is the raw data file. And Here is the screenshot.
+
+```{r}
+# Load Packages
+library(tidyverse)
+library(scales)
+library(readr)
+library(patchwork)
+library(cowplot)
+```
+
+```{r}
+# Load and Inspect Data
+names_df <- read_csv("presentation-exercise/unisex_names_table.csv")
+
+glimpse(names_df)
+```
+
+```{r}
+names_df <- names_df %>%
+  rename(rank = `...1`) %>%
+  mutate(
+    rank = as.integer(rank),
+    name = as.character(name),
+    total = as.numeric(total),
+    male_share = as.numeric(male_share),
+    female_share = as.numeric(female_share)
+  ) %>%
+  arrange(rank)
+glimpse(names_df)
+```
+
+```{r}
+# Keep top 20 (the graphic shows 1–20)
+top20 <- names_df %>% filter(rank <= 20)
+```
+
+```{r}
+# If shares are in 0–100 instead of 0–1, convert to proportions
+if (max(top20$male_share, na.rm = TRUE) > 1.5) {
+  top20 <- top20 %>%
+    mutate(
+      male_share = male_share / 100,
+      female_share = female_share / 100
+    )
+}
+```
+
+```{r}
+# Long format for stacked bars
+bars <- top20 %>%
+  select(rank, name, male_share, female_share) %>%
+  pivot_longer(
+    cols = c(male_share, female_share),
+    names_to = "gender",
+    values_to = "share"
+  ) %>%
+  mutate(
+    gender = recode(gender,
+      male_share = "Male share",
+      female_share = "Female share"
+    )
+  )
+```
+
+```{r}
+# Order so rank 1 appears at the top
+top20 <- top20 %>% mutate(name = factor(name, levels = rev(top20$name)))
+bars  <- bars  %>% mutate(name = factor(name, levels = levels(top20$name)))
+
+```
+
+```{r}
+# Styling 
+bg        <- "#f2f2f2"
+grid_col  <- "#d9d9d9"
+text_col  <- "#4d4d4d"
+blue      <- "#6B9ECF"
+yellow    <- "#E3B23C"
+footer_bg <- "#666666"
+
+# Left "table" panel
+left_tbl <- ggplot(top20, aes(y = name)) +
+  geom_hline(yintercept = seq(0.5, nrow(top20) + 0.5, by = 1),
+             color = grid_col, linewidth = 0.6) +
+  geom_text(aes(x = 0.02, label = rank),
+            hjust = 0, color = text_col, size = 4) +
+  geom_text(aes(x = 0.16, label = as.character(name)),
+            hjust = 0, color = text_col, size = 4.5) +
+  geom_text(aes(x = 0.98, label = comma(round(total))),
+            hjust = 1, color = text_col, size = 4) +
+  annotate("text",
+           x = 0.14, y = nrow(top20) + 1.65, label = "NAME",
+           hjust = 0, color = text_col, fontface = "bold", size = 3.6) +
+  annotate("text",
+           x = 0.98, y = nrow(top20) + 1.90, label = "ESTIMATED PEOPLE\nWITH NAME",
+           hjust = 1, color = text_col, fontface = "bold", size = 3.2, lineheight = 0.95) +
+  annotate("segment", x = 0, xend = 1,
+           y = nrow(top20) + 0.9, yend = nrow(top20) + 0.9,
+           linewidth = 1, color = text_col) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0.5, nrow(top20) + 2.2), clip = "off") +
+  theme_void() +
+  theme(
+    plot.background = element_rect(fill = bg, color = NA),
+    panel.background = element_rect(fill = bg, color = NA),
+    plot.margin = margin(20, 0, 0, 20)
+  )
+
+# Right stacked bars panel
+right_bars <- ggplot(bars, aes(x = share, y = name, fill = gender)) +
+  geom_vline(xintercept = seq(0, 1, by = 0.25),
+             color = grid_col, linewidth = 0.8) +
+  geom_hline(yintercept = seq(0.5, nrow(top20) + 0.5, by = 1),
+             color = grid_col, linewidth = 0.6) +
+  geom_col(width = 0.82) +
+  geom_text(
+    aes(label = percent(share, accuracy = 1)),
+    position = position_stack(vjust = 0.5),
+    color = text_col,
+    size = 3.6
+  ) +
+  scale_fill_manual(values = c("Male share" = blue, "Female share" = yellow)) +
+  annotate("text", x = 0.25, y = nrow(top20) + 1.6, label = "MALE SHARE",
+           color = blue, fontface = "bold", size = 3.4) +
+  annotate("text", x = 0.75, y = nrow(top20) + 1.6, label = "FEMALE SHARE",
+           color = yellow, fontface = "bold", size = 3.4) +
+  annotate("segment", x = 0, xend = 1,
+           y = nrow(top20) + 0.9, yend = nrow(top20) + 0.9,
+           linewidth = 1, color = text_col) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0.5, nrow(top20) + 2.2), clip = "off") +
+  theme_void() +
+  theme(
+    legend.position = "none",
+    plot.background = element_rect(fill = bg, color = NA),
+    panel.background = element_rect(fill = bg, color = NA),
+    plot.margin = margin(20, 20, 0, 0)
+  )
+
+main_panel <- left_tbl + right_bars + plot_layout(widths = c(0.43, 0.57))
+
+
+
+final_plot <- cowplot::ggdraw() +
+  # background
+  cowplot::draw_grob(grid::rectGrob(gp = grid::gpar(fill = bg, col = NA)),
+                     x = 0, y = 0, width = 1, height = 1) +
+  # title
+  cowplot::draw_label(
+    "The Most Common Unisex Names In America",
+    x = 0.03, y = 0.97, hjust = 0, vjust = 1,
+    fontface = "bold", size = 20, color = text_col
+  ) +
+  # subtitle
+  cowplot::draw_label(
+    "Names for which at least one-third of recipients were male and at\nleast one-third were female, through 2013",
+    x = 0.03, y = 0.915, hjust = 0, vjust = 1,
+    size = 12.5, color = text_col, lineheight = 1.05
+  ) +
+  # main panel
+  cowplot::draw_plot(main_panel, x = 0.02, y = 0.08, width = 0.96, height = 0.72) +
+  # footer bar
+  cowplot::draw_grob(grid::rectGrob(gp = grid::gpar(fill = footer_bg, col = NA)),
+                     x = 0.02, y = 0.02, width = 0.96, height = 0.07,
+                     hjust = 0, vjust = 0) +
+  cowplot::draw_label("FIVETHIRTYEIGHT",
+                      x = 0.03, y = 0.055, hjust = 0, vjust = 0.5,
+                      size = 10.5, color = "white") +
+  cowplot::draw_label("SOURCE: SOCIAL SECURITY ADMINISTRATION",
+                      x = 0.97, y = 0.055, hjust = 1, vjust = 0.5,
+                      size = 10.5, color = "white")
+
+final_plot
+```
+
+
+
+```{r}
+# Export high-quality PNG
+ggsave(
+  "unisex_names_plot.png",
+  plot = final_plot,
+  width = 11,
+  height = 8,
+  dpi = 300
+)
+```
+
+```{r}
+# Save PNG file to presentation-exercise folder 
+ggsave("presentation-exercise/unisex_plot.png", final_plot)
+```
+
+# Summary of recreating the graph 
+I was not able to get the graph perfectly the same as what was produced in the article. Most of my issues were with the alignment of the text and formatting. Getting the data to be the same was the easy part. 
+
+# Creating a publication quality table
+ChatGPT Prompt:I want you to use the same data you used for the graph and create a nice looking table. The table should be appropriately formatted to display some type of potentially interesting result. The table should take up at most one standard letter-sized page if printed and should summarize information in a useful way. The table must contain an example of each of the following: Formatted text which can be bold, italic, Colored text or highlighted cells. Also, text outside of the regular table structure like spanning column headers or correctly attributed footnotes. Also, A descriptive caption explaining the useful information summary that your table represents. Additionally, the table must contain the following advanced feature: Automatically calculated summary statistics (summary statistics that you calculate manually do not count towards this objective)
+
+```{r}
+# Load libraries + data
+library(tidyverse)
+library(gt)
+
+names_df <- read_csv("presentation-exercise/unisex_names_table.csv", show_col_types = FALSE) %>%
+  rename(rank = `...1`)
+```
+
+```{r}
+# Create useful summary statistics (AUTO-CALCULATED)
+summary_tbl <- names_df %>%
+  filter(rank <= 20) %>%
+  mutate(
+    dominance = case_when(
+      male_share > 0.60 ~ "Mostly male",
+      female_share > 0.60 ~ "Mostly female",
+      TRUE ~ "Balanced"
+    ),
+    male_pct = male_share * 100,
+    female_pct = female_share * 100
+  ) %>%
+  select(
+    Rank = rank,
+    Name = name,
+    `People With Name` = total,
+    `Male %` = male_pct,
+    `Female %` = female_pct,
+    Dominance = dominance
+  )
+  summary(summary_tbl)
+```
+
+```{r}
+gt_table <- summary_tbl %>%
+  gt() %>%
+
+  # CAPTION
+  tab_caption(
+    md("**Top 20 Most Common Unisex Names in the U.S.**  
+    This table summarizes gender distribution and population estimates for the most common unisex names.")
+  ) %>%
+
+  # SPANNING HEADER
+  tab_spanner(
+    label = "Gender Distribution",
+    columns = c(`Male %`, `Female %`)
+  ) %>%
+
+  # FORMAT NUMBERS
+  fmt_number(columns = `People With Name`, decimals = 0) %>%
+  fmt_number(columns = c(`Male %`, `Female %`), decimals = 1) %>%
+
+  # COLOR HIGHLIGHT
+  data_color(
+    columns = `Male %`,
+    colors = scales::col_numeric(
+      palette = c("#e3f2fd", "#1565c0"),
+      domain = NULL
+    )
+  ) %>%
+
+  data_color(
+    columns = `Female %`,
+    colors = scales::col_numeric(
+      palette = c("#fff3e0", "#ef6c00"),
+      domain = NULL
+    )
+  ) %>%
+
+  # FORMATTED TEXT
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+
+  tab_style(
+    style = cell_text(style = "italic"),
+    locations = cells_body(columns = Dominance)
+  ) %>%
+
+  # FOOTNOTE
+  tab_footnote(
+    footnote = "Gender percentages derived from SSA historical data.",
+    locations = cells_title(groups = "title")
+  ) %>%
+
+  # TABLE WIDTH (fits printed page) 
+  cols_width(everything() ~ px(120)) %>%
+
+  tab_options(
+    table.font.size = 12,
+    data_row.padding = px(4)
+  )
+
+gt_table
+```
+
+```{r}
+# Export to the presentation-exercise folder
+gtsave(gt_table, "presentation-exercise/unisex_table.png")
+```
