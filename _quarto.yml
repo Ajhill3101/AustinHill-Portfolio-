@@ -20,6 +20,8 @@ website:
             file: cdcdata-exercise/cdcdata-exercise.qmd
           - text: "Presenting Data and Results Exercise"
             file: presentation-exercise/presentation-exercise.qmd
+          - text: "Fitting Basic Statistical Models"
+            file: fitting-exercise/fitting-exercise.qmd
     right:
       - icon: github 
         href: https://github.com/Ajhill3101/AustinHill-portfolio        

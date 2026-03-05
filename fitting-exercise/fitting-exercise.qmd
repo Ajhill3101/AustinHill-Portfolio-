@@ -1,0 +1,351 @@
+---
+title: "Fitting Basic Statistical Models"
+format: html
+---
+# Data processing and exploration
+```{r}
+# Load libraries
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(here)
+```
+
+```{r}
+# Load the CSV file
+Mavoglurant_data <- read_csv(here("fitting-exercise", "Mavoglurant_A2121_nmpk.csv"))
+
+# View first rows
+head(data)
+
+# Check column types
+glimpse(data)
+```
+
+
+```{r}
+# Faceted Plot with Different Color per Dose
+ggplot(Mavoglurant_data, aes(x = TIME, y = DV, group = ID, color = DOSE)) +
+  geom_line(alpha = 0.6) +
+  facet_wrap(~ DOSE) +
+  labs(
+    title = "Outcome (DV) Over Time Stratified by Dose",
+    x = "Time",
+    y = "DV",
+    color = "Dose"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Keep only observations where OCC == 1
+Mavoglurant_data_occ1 <- Mavoglurant_data %>%
+  filter(OCC == 1)
+```
+
+```{r}
+# Check that only OCC = 1 remains
+unique(Mavoglurant_data_occ1$OCC)
+
+# Compare number of rows before and after filtering
+nrow(Mavoglurant_data)
+nrow(Mavoglurant_data_occ1)
+```
+
+```{r}
+# Remove observations where TIME == 0
+data_no_time0 <- Mavoglurant_data_occ1 %>%
+  filter(TIME != 0)
+
+# Compute sum of DV for each individual
+Y_df <- data_no_time0 %>%
+  group_by(ID) %>%
+  summarize(Y = sum(DV, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+# Create Dataset with TIME == 0 Only
+time0_df <- Mavoglurant_data_occ1 %>%
+  filter(TIME == 0)
+```
+
+```{r}
+# Join the Two Data Frames
+final_df <- left_join(time0_df, Y_df, by = "ID")
+```
+
+```{r}
+# Convert RACE and SEX to factors and keep only selected variables
+analysis_df <- final_df %>%
+  mutate(
+    RACE = as.factor(RACE),
+    SEX  = as.factor(SEX)
+  ) %>%
+  select(Y, DOSE, AGE, SEX, RACE, WT, HT)
+```
+
+```{r}
+# Check structure
+str(analysis_df)
+
+# Check dimensions
+dim(analysis_df)
+```
+
+# EDA
+
+
+```{r}
+# Load required packages
+library(tidyverse)
+library(GGally)
+
+# Overall summary statistics
+analysis_df %>%
+  summarize(
+    n = n(),
+    mean_Y = mean(Y, na.rm = TRUE),
+    sd_Y   = sd(Y, na.rm = TRUE),
+    mean_AGE = mean(AGE, na.rm = TRUE),
+    mean_WT  = mean(WT, na.rm = TRUE),
+    mean_HT  = mean(HT, na.rm = TRUE)
+  )
+```
+
+```{r}
+# Summary by DOSE
+analysis_df %>%
+  group_by(DOSE) %>%
+  summarize(
+    n = n(),
+    mean_Y = mean(Y, na.rm = TRUE),
+    sd_Y   = sd(Y, na.rm = TRUE)
+  )
+# Counts for Categorical Variables
+table(analysis_df$SEX)
+table(analysis_df$RACE)
+table(analysis_df$DOSE)
+```
+
+```{r}
+# Scatterplots and Boxplots
+# Y vs Continuous Predictors
+# Y vs AGE
+ggplot(analysis_df, aes(x = AGE, y = Y)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Total Drug (Y) vs Age")
+
+# Y vs WT
+ggplot(analysis_df, aes(x = WT, y = Y)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Total Drug (Y) vs Weight")
+
+# Y vs HT
+ggplot(analysis_df, aes(x = HT, y = Y)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Total Drug (Y) vs Height")
+```
+```{r}
+# Y vs Categorical Predictors
+# Y by DOSE
+ggplot(analysis_df, aes(x = DOSE, y = Y)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Total Drug (Y) by Dose")
+
+# Y by SEX
+ggplot(analysis_df, aes(x = SEX, y = Y)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Total Drug (Y) by Sex")
+
+# Y by RACE
+ggplot(analysis_df, aes(x = RACE, y = Y)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Total Drug (Y) by Race")
+```
+
+```{r}
+# Correlation Matrix (Continuous Variables Only)
+# Select continuous variables
+continuous_vars <- analysis_df %>%
+  select(Y, AGE, WT, HT)
+
+# Correlation matrix
+cor(continuous_vars, use = "complete.obs")
+GGally::ggpairs(
+  continuous_vars,
+  title = "Pairwise Relationships Between Continuous Variables"
+)
+```
+
+# Model Fitting 
+
+```{r}
+# load libraries 
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r}
+# Ensure categorical variables are coded as factors
+analysis_df <- analysis_df %>%
+  mutate(
+    DOSE = as.factor(DOSE),
+    SEX  = as.factor(SEX),
+    RACE = as.factor(RACE)
+  )
+
+set.seed(123)    # Ensures you get the same split every time you run
+```
+```{r}
+# Create 10-fold cross-validation object
+cv_folds <- vfold_cv(
+  analysis_df,      # dataset
+  v = 10,           # number of folds
+  strata = DOSE     # keep dose distribution balanced across folds
+)
+cv_folds_sex <- vfold_cv(       # Create 10-fold cross-validation splits for the SEX models
+  analysis_df,                  # Data to split into folds
+  v = 10,                       # Number of folds
+  strata = SEX                  # Keep SEX class balance similar across folds
+)
+```
+
+# CONTINUOUS OUTCOME (Y)- LINEAR REGRESSION
+
+```{r}
+# Linear regression models (Outcome = Y)
+
+# Model specification
+lm_spec <- linear_reg() %>% # Define a linear regression model
+  set_engine("lm")          # Use base R's lm() function to fit the model
+```
+```{r}
+# Model 1: Predict Y using DOSE
+rec_y_dose <- recipe(               # Create preprocessing recipe
+  Y ~ DOSE,                         # Define formula: Y predicted by DOSE
+  data = analysis_df                # Use the full dataset to define variables
+) %>%
+  step_dummy(all_nominal_predictors()) # Convert categorical predictors (DOSE) into dummy variables
+
+wf_y_dose <- workflow() %>%         # Create a workflow object
+  add_recipe(rec_y_dose) %>%        # Add preprocessing steps from the recipe
+  add_model(lm_spec)                # Add the linear regression model
+
+res_y_dose <- fit_resamples(        # Fit model repeatedly across cross-validation folds
+  wf_y_dose,                        # Workflow containing model and preprocessing
+  resamples = cv_folds,             # Use the 10-fold cross-validation object
+  metrics = metric_set(rmse, rsq)   # Compute RMSE and R-squared performance metrics
+)
+
+metrics_y_dose <- collect_metrics(res_y_dose) # Collect the averaged performance metrics from all folds
+
+```
+
+```{r}
+# Model 2: Predict Y using all predictors
+rec_y_all <- recipe(                # Create recipe for full model
+  Y ~ DOSE + AGE + SEX + RACE + WT + HT,  # Predict Y using all listed predictors
+  data = analysis_df                # Use dataset to determine variable types
+) %>%
+  step_dummy(all_nominal_predictors()) # Convert categorical variables into dummy indicators
+
+wf_y_all <- workflow() %>%          # Create workflow for full model
+  add_recipe(rec_y_all) %>%         # Add preprocessing recipe
+  add_model(lm_spec)                # Add linear regression model specification
+
+res_y_all <- fit_resamples(         # Perform cross-validated model fitting
+  wf_y_all,                         # Workflow containing recipe and model
+  resamples = cv_folds,             # Use the previously defined 10 folds
+  metrics = metric_set(rmse, rsq)   # Evaluate using RMSE and R-squared
+)
+
+metrics_y_all <- collect_metrics(res_y_all) # Extract averaged cross-validation results
+```
+```{r}
+# Printing results for linear regression models
+cat("\n Linear Regression Results (Cross-Validation) \n") 
+
+cat("\nModel 1: Y ~ DOSE\n")   
+print(metrics_y_dose)          
+
+cat("\nModel 2: Y ~ DOSE + AGE + SEX + RACE + WT + HT\n") 
+print(metrics_y_all)           
+```
+
+# Logistic regression models (Outcome = SEX)
+```{r}
+# Define logistic regression model specification
+log_spec <- logistic_reg() %>%  # Specify logistic regression model
+  set_engine("glm")             # Use base R's glm() function with binomial link
+```
+```{r}
+# Model 3: Predict SEX using DOSE
+rec_s_dose <- recipe(           # Create preprocessing recipe
+  SEX ~ DOSE,                   # Predict SEX using DOSE
+  data = analysis_df            # Use dataset to determine variable roles
+) %>%
+  step_dummy(all_nominal_predictors()) # Convert DOSE into dummy variables
+
+wf_s_dose <- workflow() %>%     # Build workflow for logistic regression
+  add_recipe(rec_s_dose) %>%    # Add preprocessing recipe
+  add_model(log_spec)           # Add logistic regression model
+
+res_s_dose <- fit_resamples(    # Perform cross-validation fitting
+  wf_s_dose,                    # Workflow object
+  resamples = cv_folds,         # Use same 10-fold cross-validation
+  metrics = metric_set(accuracy, roc_auc) # Evaluate using accuracy and ROC-AUC
+)
+
+metrics_s_dose <- collect_metrics(res_s_dose) # Extract averaged performance metrics
+```
+```{r}
+# Model 4: Predict SEX using all predictors
+rec_s_all <- recipe(            # Create preprocessing recipe
+  SEX ~ DOSE + AGE + RACE + WT + HT + Y, # Predict SEX using these predictors
+  data = analysis_df            # Use dataset to determine variable types
+) %>%
+  step_dummy(all_nominal_predictors()) # Convert categorical predictors to dummy variables
+
+wf_s_all <- workflow() %>%      # Create workflow object
+  add_recipe(rec_s_all) %>%     # Add preprocessing recipe
+  add_model(log_spec)           # Add logistic regression model
+
+res_s_all <- fit_resamples(     # Fit logistic model across cross-validation folds
+  wf_s_all,                     # Workflow containing model and preprocessing
+  resamples = cv_folds,         # Use the same folds
+  metrics = metric_set(accuracy, roc_auc) # Evaluate classification performance
+)
+
+metrics_s_all <- collect_metrics(res_s_all) # Collect averaged accuracy and ROC-AUC values
+
+# Print results for logistic regression models
+cat("\n Logistic Regression Results (Cross-Validation) \n") 
+
+cat("\nModel 3: SEX ~ DOSE\n")   
+print(metrics_s_dose)           
+
+cat("\nModel 4: SEX ~ DOSE + AGE + RACE + WT + HT + Y\n") # Identify the fourth model
+print(metrics_s_all)             
+```
+
+
+# This code uses the tidymodels framework with 10 fold cross validation to evaluate the models. Instead of splitting the dataset into one training set and one testing set, the data are divided into ten smaller groups (folds). The model is trained on nine of these groups and tested on the remaining one, and this process is repeated ten times so that each group is used as the test set once. The performance metrics (RMSE, R², accuracy, and ROC-AUC) are then averaged across all ten runs.
+
+
+# Interpretation of Model Results
+
+# For the linear regression models predicting total drug exposure (Y), the model using only DOSE had an RMSE of about 667 and an R² of 0.574. This means that dose alone explains about 57% of the variability in Y, which suggests that DOSE is an important predictor of total drug exposure. When the other predictors (AGE, SEX, RACE, WT, and HT) were added to the model, the RMSE decreased slightly to around 626 and the R² increased to 0.601. This shows a small improvement in model performance, meaning the additional variables help explain a little more of the variation in Y, but DOSE still appears to be the most important factor.
+
+# For the logistic regression models predicting SEX, the model using only DOSE had an accuracy of about 0.87 but a low ROC-AUC of 0.567. This suggests that while the model classified many observations correctly, DOSE alone does not do a great job distinguishing between the two SEX groups. When all predictors were included, the model improved quite a bit, with accuracy increasing to about 0.92 and ROC-AUC increasing to 0.836. This indicates that variables like AGE, weight, height, and Y provide useful information for predicting SEX. Overall, the results make sense because dose would naturally affect total drug exposure, while characteristics like body size are more likely to be related to sex differences.
+
