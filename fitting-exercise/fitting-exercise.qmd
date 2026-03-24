@@ -66,7 +66,7 @@ Y_df <- data_no_time0 %>%
 ```
 
 ```{r}
-# Create Dataset with TIME == 0 Only
+# Create Dataset with TIME = 0 Only
 time0_df <- Mavoglurant_data_occ1 %>%
   filter(TIME == 0)
 ```
@@ -349,3 +349,203 @@ print(metrics_s_all)
 
 # For the logistic regression models predicting SEX, the model using only DOSE had an accuracy of about 0.87 but a low ROC-AUC of 0.567. This suggests that while the model classified many observations correctly, DOSE alone does not do a great job distinguishing between the two SEX groups. When all predictors were included, the model improved quite a bit, with accuracy increasing to about 0.92 and ROC-AUC increasing to 0.836. This indicates that variables like AGE, weight, height, and Y provide useful information for predicting SEX. Overall, the results make sense because dose would naturally affect total drug exposure, while characteristics like body size are more likely to be related to sex differences.
 
+
+
+# **Model Improvement Exercise**
+
+
+```{r}
+
+# Load required packages
+library(tidyverse)
+library(tidymodels)
+# define seed
+rngseed <- 1234 
+```
+```{r}
+# Remove the RACE variable
+
+analysis_df_no_race <- analysis_df %>%
+  select(-RACE)
+
+# Use glimpse to inspect the dataset
+glimpse(analysis_df_no_race)
+```
+```{r}
+
+# Set seed and split into 75% train / 25% test
+
+set.seed(rngseed)
+
+data_split <- initial_split(analysis_df_no_race, prop = 0.75)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+# Inspect the split data
+glimpse(train_data)
+glimpse(test_data)
+```
+```{r}
+# Set seed and split into 75% train / 25% test
+
+set.seed(rngseed)
+
+data_split <- initial_split(analysis_df_no_race, prop = 0.75)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+# Inspect the split data
+glimpse(train_data)
+glimpse(test_data)
+```
+```{r}
+# Model 1: Y ~ DOSE
+
+model1_recipe <- recipe(Y ~ DOSE, data = train_data)
+
+model1_workflow <- workflow() %>%
+  add_recipe(model1_recipe) %>%
+  add_model(lm_spec)
+
+model1_fit <- fit(model1_workflow, data = train_data)
+```
+```{r}
+# Model 2: Y ~ all predictors
+
+model2_recipe <- recipe(Y ~ ., data = train_data)
+
+model2_workflow <- workflow() %>%
+  add_recipe(model2_recipe) %>%
+  add_model(lm_spec)
+
+model2_fit <- fit(model2_workflow, data = train_data)
+```
+
+```{r}
+# Compute predictions on the TRAINING data
+
+# Model 1 training predictions
+model1_train_preds <- train_data %>%
+  bind_cols(predict(model1_fit, new_data = train_data)) %>%
+  rename(predicted = .pred) %>%
+  select(Y, predicted)
+
+# Model 2 training predictions
+model2_train_preds <- train_data %>%
+  bind_cols(predict(model2_fit, new_data = train_data)) %>%
+  rename(predicted = .pred) %>%
+  select(Y, predicted)
+```
+
+```{r}
+# Compute RMSE on the TRAINING data
+
+model1_train_rmse <- model1_train_preds %>%
+  rmse(truth = Y, estimate = predicted) %>%
+  mutate(model = "Y ~ DOSE")
+
+model2_train_rmse <- model2_train_preds %>%
+  rmse(truth = Y, estimate = predicted) %>%
+  mutate(model = "Y ~ all predictors")
+
+# Compare training RMSE
+train_rmse_results <- bind_rows(model1_train_rmse, model2_train_rmse) %>%
+  select(model, .metric, .estimate)
+
+train_rmse_results
+```
+
+
+```{r}
+# Identify best-fitting model on training data
+
+best_model_name <- train_rmse_results %>%
+  arrange(.estimate) %>%
+  slice(1) %>%
+  pull(model)
+
+best_model_name
+```
+
+```{r}
+# Compute RMSE for the null model on TRAINING data
+#    (predicts the mean of Y for all observations)
+
+y_mean <- mean(train_data$Y, na.rm = TRUE)
+
+null_train_preds <- train_data %>%
+  mutate(predicted = y_mean) %>%
+  select(Y, predicted)
+
+null_train_rmse <- null_train_preds %>%
+  rmse(truth = Y, estimate = predicted) %>%
+  mutate(model = "Null model") %>%
+  select(model, .metric, .estimate)
+
+null_train_rmse
+```
+
+```{r}
+
+# Compare RMSE for both fitted models and null model
+
+all_train_rmse <- bind_rows(
+  model1_train_rmse %>% select(model, .metric, .estimate),
+  model2_train_rmse %>% select(model, .metric, .estimate),
+  null_train_rmse
+)
+
+all_train_rmse
+
+```
+# Discussion on RMSE value 
+# The Null Model (baseline) is doing the worst with a huge error of 948. When we moved to Model 1, the error dropped significantly to 702. But Model 2 improved things even further, knocking the error down to 627. Which means using all predictors provided a better result than just using Dose. 
+```{r}
+
+# Re-set seed and perform 10-fold cross-validation
+set.seed(rngseed)
+
+cv_folds <- vfold_cv(train_data, v = 10)
+```
+
+```{r}
+
+# Compute cross-validated RMSE for Model 1
+
+model1_cv_results <- fit_resamples(
+  model1_workflow,
+  resamples = cv_folds,
+  metrics = metric_set(rmse)
+)
+
+collect_metrics(model1_cv_results)
+
+```
+
+```{r}
+# Compute cross-validated RMSE for Model 2
+
+model2_cv_results <- fit_resamples(
+  model2_workflow,
+  resamples = cv_folds,
+  metrics = metric_set(rmse)
+)
+
+collect_metrics(model2_cv_results)
+```
+
+```{r}
+# Compare cross-validated RMSE for both models
+
+cv_rmse_results <- bind_rows(
+  collect_metrics(model1_cv_results) %>% mutate(model = "Y ~ DOSE"),
+  collect_metrics(model2_cv_results) %>% mutate(model = "Y ~ all predictors")
+) %>%
+  select(model, .metric, mean, std_err)
+
+cv_rmse_results
+```
+# Discussion on RMSE value after CV
+# Overall, Model 2 still outperforms Model 1 and the null model after cross-validation, but the gap between the models narrows. This suggests that while Model 2 remains the best predictive model, its advantage is somewhat reduced when evaluated on unseen data.
