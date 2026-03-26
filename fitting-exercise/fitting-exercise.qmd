@@ -549,3 +549,132 @@ cv_rmse_results
 ```
 # Discussion on RMSE value after CV
 # Overall, Model 2 still outperforms Model 1 and the null model after cross-validation, but the gap between the models narrows. This suggests that while Model 2 remains the best predictive model, its advantage is somewhat reduced when evaluated on unseen data.
+
+# This section added by Joe Dainis
+
+## Make dataframes for all of the observed data and plot it
+```{r}
+#Dataframe of predictions for Model 1
+model1fit_df <- train_data %>%
+  mutate(predicted = predict(model1_fit, new_data = train_data)$.pred,
+         model = "Model 1: DOSE")
+
+#Dataframe of predictions for Model 2
+model2fit_df <- train_data %>%
+  mutate(predicted = predict(model2_fit, new_data = train_data)$.pred,
+         model = "Model 2: All predictors")
+
+#Dataframe of null model predictions
+y_mean
+
+null_df <- train_data %>%
+  mutate(predicted = y_mean,
+         model = "Null model")
+
+#Combine the three dataframes into one
+all_predictions <- bind_rows(model1fit_df, model2fit_df, null_df)
+
+#Plot the observed versus predicted Y values from the 3 models
+all_predictions_plot <- ggplot(all_predictions, aes(x = Y, y = predicted, color = model)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  coord_cartesian(xlim = c(0, 5000), ylim = c(0, 5000)) +
+  labs(
+    title = "Observed vs Predicted Values Across Dose, All Variables and Null Models",
+    x = "Observed Y",
+    y = "Predicted Y"
+  ) +
+  theme_minimal()
+
+all_predictions_plot
+```
+
+## Plot Residuals for Model 2
+```{r}
+#Create residuals from predicted - observed for Model 2
+model2_residuals <- train_data %>%
+  mutate(
+    predicted = predict(model2_fit, new_data = train_data)$.pred,
+    residuals = predicted - Y
+  )
+
+#Plot predicted Y values versus residuals for Model 2
+residuals_plot <- ggplot(model2_residuals, aes(x = predicted, y = residuals)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "solid") +
+  labs(
+    title = "Predicted Values versus Residuals for Model 2",
+    x = "Predicted Y",
+    y = "Residuals"
+  ) +
+  ylim(-3000, 3000) +   # symmetric range
+  theme_minimal()
+
+residuals_plot
+```
+
+# Bootstrap Sampling
+```{r}
+#Load necessary libraries
+library(purrr)
+
+#Set the seed as done before using rngseed
+set.seed(rngseed)
+
+#Create 100 samples using the bootstraps function
+boot_samples <- bootstraps(train_data, times = 100)
+
+#Fit the model to the bootstrap samples using the map function
+boot_predictions <- map(boot_samples$splits, function(split) {
+  boot_data <- analysis(split)
+  #Fit All Variables Model on bootstrap samples
+  fit <- workflow() %>%
+    add_recipe(recipe(Y ~ ., data = boot_data)) %>%
+    add_model(lm_spec) %>%
+    fit(data = boot_data)
+  #Make predictions on original training data
+  predict(fit, new_data = train_data)$.pred
+})
+
+# Convert the generated list into an array for median and 89% CIs
+pred_bs <- do.call(rbind, boot_predictions)
+
+#Compute median and 89% Confidence Intervals
+preds <- pred_bs |>
+  apply(2, quantile, c(0.055, 0.5, 0.945)) |>
+  t()
+
+preds_df <- as.data.frame(preds)
+colnames(preds_df) <- c("lower", "median", "upper")
+
+#Combine observed and original predictions into single dataframe
+final_boot_df <- train_data %>%
+  mutate(
+    point_estimate = predict(model2_fit, new_data = train_data)$.pred
+  ) %>%
+  bind_cols(preds_df)
+
+#Plot the observed values and bootstap sampling output
+observed_bootstrap_plot <- ggplot(final_boot_df, aes(x = Y)) +
+  #Mean of original predictions
+  geom_point(aes(y = point_estimate), color = "black", alpha = 0.6) +
+  #Median of the bootstrap samples
+  geom_point(aes(y = median), color = "blue", alpha = 0.6) +
+  #Confidence interval upper and lower bouds of bootstrap samples
+  geom_errorbar(aes(ymin = lower, ymax = upper), color = "purple", alpha = 0.3) +
+  #Add solid line from intercept
+  geom_abline(slope = 1, intercept = 0, linetype = "solid") +
+  #Ensure x and y axes are same limits
+  coord_cartesian(xlim = c(0, 5000), ylim = c(0, 5000)) +
+  labs(
+    title = "Correlation Between Observed and Predicted Values",
+    x = "Original Observed Y Values",
+    y = "Bootstrapped Y Predictions from Fitted Model 2"
+  ) +
+  theme_minimal()
+
+observed_bootstrap_plot
+```
+
+## Interpretation
+I see that there is a positive correlation between the observed Y values and the bootstrapped sample Y predictions fitted from our All Variables Model. This positive correlation indicates that the model is properly predicting the observed Y values, as we would see no trend/scattering of points if the model was not correlating with the observed Y values. As well, the Confidence Intervals (CIs) from the bootstrapping reveals that most points have minimal uncertainity.
