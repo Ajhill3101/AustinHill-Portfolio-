@@ -678,3 +678,68 @@ observed_bootstrap_plot
 
 ## Interpretation
 I see that there is a positive correlation between the observed Y values and the bootstrapped sample Y predictions fitted from our All Variables Model. This positive correlation indicates that the model is properly predicting the observed Y values, as we would see no trend/scattering of points if the model was not correlating with the observed Y values. As well, the Confidence Intervals (CIs) from the bootstrapping reveals that most points have minimal uncertainity.
+
+# Final evaluation using test data
+
+# Test-Set Predictions for Model 2
+
+```{r}
+# Use the fitted Model 2 to make predictions on the test data
+model2_test_preds <- test_data %>%
+  mutate(predicted = predict(model2_fit, new_data = test_data)$.pred)
+
+# compute test RMSE
+model2_test_rmse <- model2_test_preds %>%
+  rmse(truth = Y, estimate = predicted)
+
+model2_test_rmse
+```
+
+```{r}
+# Create a training-data prediction data frame
+model2_train_plot_df <- train_data %>%
+  mutate(
+    predicted = predict(model2_fit, new_data = train_data)$.pred,
+    dataset = "Training data"
+  ) %>%
+  select(Y, predicted, dataset)
+
+# Create a test-data prediction data frame
+model2_test_plot_df <- test_data %>%
+  mutate(
+    predicted = predict(model2_fit, new_data = test_data)$.pred,
+    dataset = "Test data"
+  ) %>%
+  select(Y, predicted, dataset)
+
+# Combine training and test predictions into one data frame
+model2_train_test_preds <- bind_rows(
+  model2_train_plot_df,
+  model2_test_plot_df
+)
+
+glimpse(model2_train_test_preds)
+```
+
+```{r}
+# Plot predicted versus observed for both training and test data
+model2_train_test_plot <- ggplot(
+  model2_train_test_preds,
+  aes(x = Y, y = predicted, color = dataset, shape = dataset)
+) +
+  geom_point(alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  coord_cartesian(xlim = c(0, 5000), ylim = c(0, 5000)) +
+  labs(
+    title = "Observed vs Predicted Values for Model 2",
+    x = "Observed Y",
+    y = "Predicted Y",
+    color = "Data set",
+    shape = "Data set"
+  ) +
+  theme_minimal()
+
+model2_train_test_plot
+```
+# Discussion: 
+Model 2 performed best overall, showing the lowest prediction error and closest alignment to the 45-degree line, indicating strong predictive accuracy. The training data points lie slightly closer to the line than the test data, suggesting mild overfitting but still good generalization. The test set results remain consistent with training performance, indicating that Model 2 generalizes reasonably well to new, unseen data.
