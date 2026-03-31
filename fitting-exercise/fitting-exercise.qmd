@@ -340,15 +340,19 @@ print(metrics_s_all)
 ```
 
 
-# This code uses the tidymodels framework with 10 fold cross validation to evaluate the models. Instead of splitting the dataset into one training set and one testing set, the data are divided into ten smaller groups (folds). The model is trained on nine of these groups and tested on the remaining one, and this process is repeated ten times so that each group is used as the test set once. The performance metrics (RMSE, R², accuracy, and ROC-AUC) are then averaged across all ten runs.
+This code uses the tidymodels framework with 10 fold cross validation to evaluate the models. Instead of splitting the dataset into one training set and one testing set, the data are divided into ten smaller groups (folds). The model is trained on nine of these groups and tested on the remaining one, and this process is repeated ten times so that each group is used as the test set once. The performance metrics (RMSE, R², accuracy, and ROC-AUC) are then averaged across all ten runs.
 
 
 # Interpretation of Model Results
 
-# For the linear regression models predicting total drug exposure (Y), the model using only DOSE had an RMSE of about 667 and an R² of 0.574. This means that dose alone explains about 57% of the variability in Y, which suggests that DOSE is an important predictor of total drug exposure. When the other predictors (AGE, SEX, RACE, WT, and HT) were added to the model, the RMSE decreased slightly to around 626 and the R² increased to 0.601. This shows a small improvement in model performance, meaning the additional variables help explain a little more of the variation in Y, but DOSE still appears to be the most important factor.
+For the linear regression models predicting total drug exposure (Y), the model using only DOSE had an RMSE of about 667 and an R² of 0.574. This means that dose alone explains about 57% of the variability in Y, which suggests that DOSE is an important predictor of total drug exposure. When the other predictors (AGE, SEX, RACE, WT, and HT) were added to the model, the RMSE decreased slightly to around 626 and the R² increased to 0.601. This shows a small improvement in model performance, meaning the additional variables help explain a little more of the variation in Y, but DOSE still appears to be the most important factor.
 
-# For the logistic regression models predicting SEX, the model using only DOSE had an accuracy of about 0.87 but a low ROC-AUC of 0.567. This suggests that while the model classified many observations correctly, DOSE alone does not do a great job distinguishing between the two SEX groups. When all predictors were included, the model improved quite a bit, with accuracy increasing to about 0.92 and ROC-AUC increasing to 0.836. This indicates that variables like AGE, weight, height, and Y provide useful information for predicting SEX. Overall, the results make sense because dose would naturally affect total drug exposure, while characteristics like body size are more likely to be related to sex differences.
+For the logistic regression models predicting SEX, the model using only DOSE had an accuracy of about 0.87 but a low ROC-AUC of 0.567. This suggests that while the model classified many observations correctly, DOSE alone does not do a great job distinguishing between the two SEX groups. When all predictors were included, the model improved quite a bit, with accuracy increasing to about 0.92 and ROC-AUC increasing to 0.836. This indicates that variables like AGE, weight, height, and Y provide useful information for predicting SEX. Overall, the results make sense because dose would naturally affect total drug exposure, while characteristics like body size are more likely to be related to sex differences.
 
+```{r}
+# save as rds file for machine learning model one 
+saveRDS(analysis_df, file = here("fitting-exercise", "analysis_df.rds"))
+```
 
 
 # **Model Improvement Exercise**
