@@ -1,0 +1,320 @@
+---
+title: "Machine learning Models"
+format: html
+---
+# **Machine Learning Models 1**
+
+# Load packages, define the seed, and read the data
+```{r}
+# Core modeling and plotting packages
+library(tidymodels)
+library(ggplot2)
+library(glmnet)
+library(ranger)
+library(corrplot)
+library(here)
+
+# Set the random-number seed requested in the instructions
+rngseed <- 1234
+set.seed(rngseed)
+
+# Load the attached RDS file
+analysis_df <- readRDS(here("ml-models-exercise","analysis_df.rds"))
+
+# Quick check of the data structure
+str(analysis_df)
+```
+# Combine RACE categories 7 and 88 into category 3 and created BMI. 
+```{r}
+analysis_df <- analysis_df |>
+  mutate(
+    # Ensure categorical variables are stored as factors
+    DOSE = factor(DOSE),
+    SEX  = factor(SEX),
+    RACE = as.character(RACE),
+    RACE = if_else(RACE %in% c("7", "88"), "3", RACE),
+    RACE = factor(RACE),
+
+    # Correct BMI formula for weight in kg and height in meters
+    BMI = WT / (HT^2)
+  ) |>
+  filter(!is.na(Y))
+
+# Quick checks
+summary(analysis_df$BMI)
+str(analysis_df)
+```
+# Correlation plot for continuous variables
+```{r}
+continuous_df <- analysis_df |>
+  select(where(is.numeric))
+
+cor_mat <- cor(continuous_df, use = "pairwise.complete.obs")
+
+corrplot(
+  cor_mat,
+  method = "color",
+  type = "upper",
+  tl.col = "black",
+  tl.srt = 45,
+  diag = FALSE
+)
+```
+
+# Setting up recipes and workflows for the three models
+```{r}
+# Recipe for linear regression and LASSO
+lm_lasso_recipe <- recipe(Y ~ ., data = analysis_df) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors()) |>
+  step_lincomb(all_predictors()) |>
+  step_normalize(all_numeric_predictors())
+
+# Recipe for random forest
+rf_recipe <- recipe(Y ~ ., data = analysis_df) |>
+  step_zv(all_predictors())
+
+# Model 1: ordinary linear regression
+lm_spec <- linear_reg() |>
+  set_engine("lm")
+
+# Model 2: LASSO with fixed penalty = 0.1 for now
+lasso_spec <- linear_reg(
+  penalty = 0.1,
+  mixture = 1
+) |>
+  set_engine("glmnet")
+
+# Model 3: random forest with ranger
+rf_spec <- rand_forest() |>
+  set_engine("ranger", seed = rngseed) |>
+  set_mode("regression")
+
+# Workflows
+lm_wf <- workflow() |>
+  add_recipe(lm_lasso_recipe) |>
+  add_model(lm_spec)
+
+lasso_wf <- workflow() |>
+  add_recipe(lm_lasso_recipe) |>
+  add_model(lasso_spec)
+
+rf_wf <- workflow() |>
+  add_recipe(rf_recipe) |>
+  add_model(rf_spec)
+```
+## Fit the three models
+```{r}
+lm_fit <- fit(lm_wf, data = analysis_df)
+lasso_fit <- fit(lasso_wf, data = analysis_df)
+rf_fit <- fit(rf_wf, data = analysis_df)
+```
+
+## Make predictions on the full dataset and compute RMSE
+
+```{r}
+# Helper function to add predictions and compute RMSE
+get_apparent_rmse <- function(fitted_wf, data, model_name) {
+  preds <- predict(fitted_wf, new_data = data) |>
+    bind_cols(data |> select(Y))
+
+  rmse_val <- rmse(preds, truth = Y, estimate = .pred)
+  rmse_val$model <- model_name
+
+  list(preds = preds, rmse = rmse_val)
+}
+
+lm_results <- get_apparent_rmse(lm_fit, analysis_df, "Linear model")
+lasso_results <- get_apparent_rmse(lasso_fit, analysis_df, "LASSO (penalty = 0.1)")
+rf_results <- get_apparent_rmse(rf_fit, analysis_df, "Random forest")
+
+rmse_table <- bind_rows(
+  lm_results$rmse,
+  lasso_results$rmse,
+  rf_results$rmse
+) |>
+  select(model, .metric, .estimate)
+
+rmse_table
+```
+# Observed versus predicted plots
+```{r}
+
+plot_obs_pred <- function(pred_df, model_title) {
+  ggplot(pred_df, aes(x = Y, y = .pred)) +
+    geom_point(alpha = 0.6) +
+    geom_abline(intercept = 0, slope = 1, linetype = 2) +
+    labs(
+      title = paste("Observed vs Predicted:", model_title),
+      x = "Observed Y",
+      y = "Predicted Y"
+    ) +
+    theme_minimal()
+}
+
+plot_obs_pred(lm_results$preds, "Linear model")
+plot_obs_pred(lasso_results$preds, "LASSO (penalty = 0.1)")
+plot_obs_pred(rf_results$preds, "Random forest")
+```
+# Tune the LASSO using apparent() resamples
+
+```{r}
+# Create a tunable LASSO model
+lasso_tune_spec <- linear_reg(
+  penalty = tune(),
+  mixture = 1
+) |>
+  set_engine("glmnet")
+
+lasso_tune_wf <- workflow() |>
+  add_recipe(lm_lasso_recipe) |>
+  add_model(lasso_tune_spec)
+
+# Grid of 50 penalty values on the log10 scale
+lasso_grid <- tibble(
+  penalty = 10^seq(log10(1e-5), log10(1e2), length.out = 50)
+)
+
+# Apparent resample object
+apparent_resamples <- apparent(analysis_df)
+
+# Tune over the grid
+lasso_apparent_tuned <- tune_grid(
+  lasso_tune_wf,
+  resamples = apparent_resamples,
+  grid = lasso_grid,
+  metrics = metric_set(rmse),
+  control = control_grid(save_pred = TRUE)
+)
+
+# For apparent() there is only one resample, so keep the unsummarized results
+lasso_metrics_apparent <- collect_metrics(lasso_apparent_tuned, summarize = FALSE) |>
+  arrange(.estimate)
+
+lasso_metrics_apparent
+```
+
+# Manual Plot of LASSO tuning results
+```{r}
+# autoplot was not working for me so I made my own plot from the lasso apparent resampling Matrics 
+ggplot(lasso_metrics_apparent, aes(x = penalty, y = .estimate)) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10() +
+  labs(
+    title = "LASSO tuning results using apparent resampling",
+    x = "Penalty (log scale)",
+    y = "RMSE"
+  ) +
+  theme_minimal()
+
+```
+
+
+## Tune the random forest using apparent() resamples
+
+```{r}
+rf_tune_spec <- rand_forest(
+  trees = 300,
+  mtry = tune(),
+  min_n = tune()
+) |>
+  set_engine("ranger", seed = rngseed) |>
+  set_mode("regression")
+
+rf_tune_wf <- workflow() |>
+  add_recipe(rf_recipe) |>
+  add_model(rf_tune_spec)
+
+rf_grid <- grid_regular(
+  mtry(range = c(1L, 7L)),
+  min_n(range = c(1L, 21L)),
+  levels = 7
+)
+
+rf_apparent_tuned <- tune_grid(
+  rf_tune_wf,
+  resamples = apparent_resamples,
+  grid = rf_grid,
+  metrics = metric_set(rmse),
+  control = control_grid(save_pred = TRUE)
+)
+
+rf_metrics_apparent <- collect_metrics(rf_apparent_tuned, summarize = FALSE) |>
+  arrange(.estimate)
+
+rf_metrics_apparent
+```
+# Manual plot of random forest apparent tuning results
+```{r}
+ggplot(rf_metrics_apparent, aes(x = factor(mtry), y = factor(min_n), fill = .estimate)) +
+  geom_tile() +
+  labs(
+    title = "Random forest tuning results using apparent resampling",
+    x = "mtry",
+    y = "min_n",
+    fill = "RMSE"
+  ) +
+  theme_minimal()
+```
+
+
+
+## Proper tuning with repeated cross-validation
+
+
+```{r}
+set.seed(rngseed)
+
+cv_5x5 <- vfold_cv(
+  analysis_df,
+  v = 5,
+  repeats = 5
+)
+
+cv_5x5
+```
+
+# Re-tune the LASSO with repeated cross-validation
+
+```{r}
+lasso_cv_tuned <- tune_grid(
+  lasso_tune_wf,
+  resamples = cv_5x5,
+  grid = lasso_grid,
+  metrics = metric_set(rmse)
+)
+
+lasso_cv_tuned
+```
+
+```{r}
+autoplot(lasso_cv_tuned)
+```
+
+## Re-tune the random forest with repeated cross-validation
+
+```{r}
+rf_cv_tuned <- tune_grid(
+  rf_tune_wf,
+  resamples = cv_5x5,
+  grid = rf_grid,
+  metrics = metric_set(rmse)
+)
+
+rf_cv_tuned
+```
+
+```{r}
+autoplot(rf_cv_tuned)
+```
+
+# show the best settings found by cross-validation
+
+```{r}
+show_best(lasso_cv_tuned, metric = "rmse")
+```
+
+```{r}
+show_best(rf_cv_tuned, metric = "rmse")
+```
