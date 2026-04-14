@@ -24,9 +24,11 @@ website:
             file: fitting-exercise/fitting-exercise.qmd
           - text: "Machine Learning"
             file: ml-models-exercise/ml-models-exercise.qmd
+          - text: "Tidytuesday exercise "
+            file: tidytuesday-exercise/tidytuesday-exercise.qmd
     right:
       - icon: github 
-        href: https://github.com/Ajhill3101/AustinHill-portfolio        
+        href: https://github.com/Ajhill3101/AustinHill-portfolio-        
 format:
   html:
     theme: solar

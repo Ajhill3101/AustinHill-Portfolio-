@@ -1,0 +1,682 @@
+---
+title: "Tidy Tuesday exercise"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(janitor)
+library(broom)
+library(knitr)
+library(scales)
+library(here)
+
+# makes all plots cleaner
+theme_set(theme_bw())
+
+# tells tidymodels that "present" is the positive class
+options(yardstick.event_first = FALSE)
+
+# sets seed for down stream model testing 
+set.seed(123)
+```
+
+# Introduction
+
+The main scientific question for this analysis is:
+
+> At what Beaufort scale are Cape petrels no longer present?
+
+This is a useful question because the Beaufort scale is a standardized measure of wind intensity, and stronger wind conditions may affect whether Cape petrels are observed during a 10-minute census period. The companion question is whether sea state adds additional information beyond Beaufort scale.
+
+# Working hypothesis
+
+My hypothesis is that:
+
+> Cape petrels become less likely to be present as Beaufort scale increases, and their probability of presence may drop to near zero at very high Beaufort classes.
+
+This question maps naturally to a binary classification problem. For each ship observation period, the outcome will be whether Cape petrels were present or absent. The main predictor of interest is Beaufort wind class wind_speed_class, and a secondary environmental predictor is sea state class sea_state_class.
+
+
+# Data Sources
+
+The analysis uses four files:
+
+- birds.csv: bird observations recorded during count periods
+- ships.csv: ship-level observation conditions, including Beaufort class and sea state
+- beaufort_scale.csv: lookup table describing Beaufort classes
+- sea_states.csv: lookup table describing sea-state classes
+
+A key structural point is that bird observations are stored at the species-observation level, meaning each record_id can appear many times if multiple species were recorded during the same count period. In contrast, the weather and ship variables are stored once per record_id in ships.csv.
+
+That means we must first **join the bird and ship data**, then **aggregate to one row per `record_id`** so that the final modeling dataset represents a single count period with a single yes/no outcome for Cape petrel presence.
+
+# Load the data
+
+```{r}
+# loading in data 
+birds <- read_csv(here("tidytuesday-exercise","data","birds.csv"))
+ships <- read_csv(here("tidytuesday-exercise","data","ships.csv"))
+beaufort <- read_csv(here("tidytuesday-exercise","data","beaufort_scale.csv"))
+sea_states <- read_csv(here("tidytuesday-exercise","data","sea_states.csv"))
+```
+
+# Quick structural checks
+
+```{r}
+# quick checks
+tibble(
+  dataset = c("birds", "ships", "beaufort", "sea_states"),
+  rows = c(nrow(birds), nrow(ships), nrow(beaufort), nrow(sea_states)),
+  cols = c(ncol(birds), ncol(ships), ncol(beaufort), ncol(sea_states))
+) |>
+  kable(caption = "Dimensions of the input datasets")
+```
+
+```{r}
+# join-check
+# Check whether every bird observation links to a ship observation through record_id.
+birds_join_check <- birds |>
+  anti_join(ships, by = "record_id")
+
+tibble(
+  bird_rows = nrow(birds),
+  ship_rows = nrow(ships),
+  bird_rows_without_matching_ship_record = nrow(birds_join_check)
+) |>
+  kable(caption = "Join check for record_id")
+```
+
+The bird-level file contains many rows per record_id because several species can be recorded during the same census period. The ship file has one row per record_id. Therefore, our first data-wrangling goal is to combine these sources and then collapse to one row per count period.
+
+## Data wrangling and cleaning
+
+# Join bird and ship data
+
+```{r}
+# joined data
+joined_data <- birds |>
+  left_join(ships, by = "record_id")
+```
+
+# Define the outcome
+
+The outcome should be whether **Cape petrels were present during a count period**. In the bird table, each row is a species observation, so the species name "Daption capense" identifies Cape petrels.
+
+I create a logical indicator at the row level and then aggregate to the count-period level.
+
+```{r}
+# create outcome
+cape_record_data <- joined_data |>
+  mutate(cape_petrel_row = species_scientific_name == "Daption capense") |>
+  group_by(record_id) |>
+  summarise(
+    cape_petrel_present = any(cape_petrel_row, na.rm = TRUE),
+    wind_speed_class = first(wind_speed_class),
+    sea_state_class = first(sea_state_class),
+    date = first(date),
+    season = first(season),
+    .groups = "drop"
+  )
+```
+
+# Examine missing values
+
+Here I explicitly count missing values in the environmental predictors.
+
+```{r}
+#| label: missingness-summary
+missing_summary <- tibble(
+  variable = c("wind_speed_class", "sea_state_class"),
+  n_missing = c(sum(is.na(cape_record_data$wind_speed_class)),
+                sum(is.na(cape_record_data$sea_state_class))),
+  pct_missing = c(mean(is.na(cape_record_data$wind_speed_class)),
+                  mean(is.na(cape_record_data$sea_state_class)))
+)
+
+missing_summary |>
+  mutate(pct_missing = percent(pct_missing, accuracy = 0.1)) |>
+  kable(caption = "Missingness in the main predictors before cleaning")
+```
+
+# Why remove rows with missing Beaufort or sea state?
+
+The scientific question is specifically about Beaufort scale and, secondarily, sea state. If either predictor is missing, that row cannot contribute to a model answering this question. Therefore, removing rows with missing predictor values is justified here.
+
+
+# Remove rows with missing predictor values and standardize variable types
+
+```{r}
+# clean data
+cape_clean <- cape_record_data |>
+  filter(
+    !is.na(wind_speed_class),
+    !is.na(sea_state_class)
+  ) |>
+  mutate(
+    # Keep the outcome as a factor for classification models.
+    cape_petrel_present = factor(
+      if_else(cape_petrel_present, "present", "absent"),
+      levels = c("absent", "present")
+    ),
+    # Keep Beaufort and sea state numeric because the question is about a threshold
+    # along an ordered environmental gradient.
+    wind_speed_class = as.numeric(wind_speed_class),
+    sea_state_class = as.numeric(sea_state_class)
+  )
+```
+
+```{r}
+# cleaning results
+tibble(
+  stage = c("Aggregated to one row per record_id",
+            "After removing missing Beaufort/sea-state rows"),
+  rows = c(nrow(cape_record_data), nrow(cape_clean))
+) |>
+  kable(caption = "Rows retained after cleaning")
+```
+
+# Check outcome balance
+
+Before modeling, it is useful to know whether the outcome is very imbalanced.
+
+```{r}
+# outcome balance
+cape_clean |>
+  count(cape_petrel_present) |>
+  mutate(prop = percent(n / sum(n), accuracy = 0.1)) |>
+  kable(caption = "Outcome balance after cleaning")
+```
+
+The outcome is somewhat imbalanced, with absence more common than presence, but there are still many positive observations. That makes a binary classification analysis reasonable.
+
+## Exploratory data analysis
+
+
+# Lookup tables for Beaufort and sea state
+
+```{r}
+# lookup tables for wind data
+beaufort |>
+  select(wind_speed_class, wind_description, wind_speed_knots_min, wind_speed_knots_max) |>
+  kable(caption = "Beaufort scale lookup table")
+```
+
+```{r}
+# lookup tables for sea state data
+sea_states |>
+  select(sea_state_class, sea_state_description, wave_meters_min, wave_meters_max) |>
+  kable(caption = "Sea-state lookup table")
+```
+
+These lookup tables help interpret the environmental scale. For example, increasing Beaufort class corresponds to stronger wind conditions.
+
+# Presence by Beaufort class
+
+A direct way to address the question is to compute the observed proportion of count periods with Cape petrel presence at each Beaufort class.
+
+```{r}
+# cape petrel presence by beaufort class-summary
+beaufort_presence <- cape_clean |>
+  group_by(wind_speed_class) |>
+  summarise(
+    n_records = n(),
+    n_present = sum(cape_petrel_present == "present"),
+    prop_present = n_present / n_records,
+    .groups = "drop"
+  )
+
+beaufort_presence |>
+  mutate(prop_present = percent(prop_present, accuracy = 0.1)) |>
+  kable(caption = "Observed Cape petrel presence by Beaufort class")
+```
+
+This table is useful. It shows where Cape petrels are common, rare, or unobserved. It is also important to watch sample size: the highest Beaufort classes may have very few observations, so an observed zero there does not necessarily prove the true probability is zero.
+
+# Figure: observed proportion present by Beaufort class
+
+```{r}
+# fig-beaufort-proportion
+ggplot(beaufort_presence, aes(x = wind_speed_class, y = prop_present)) +
+  geom_col() +
+  geom_text(aes(label = n_records), vjust = -0.3, size = 3) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Observed Cape petrel presence by Beaufort class",
+    subtitle = "Numbers above bars show the number of count periods in each Beaufort class",
+    x = "Beaufort wind class",
+    y = "Observed proportion of count periods with Cape petrel presence"
+  )
+```
+
+This plot is useful because it shows both the pattern of presence and the sample size in each Beaufort class. 
+
+# Figure: presence by sea state
+
+```{r}
+# fig-sea-state-proportion
+sea_presence <- cape_clean |>
+  group_by(sea_state_class) |>
+  summarise(
+    n_records = n(),
+    n_present = sum(cape_petrel_present == "present"),
+    prop_present = n_present / n_records,
+    .groups = "drop"
+  ) |>
+  left_join(sea_states, by = "sea_state_class")
+
+
+ggplot(sea_presence, aes(x = factor(sea_state_class), y = prop_present)) +
+  geom_col() +
+  geom_text(aes(label = n_records), vjust = -0.3, size = 3) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Observed Cape petrel presence by sea-state class",
+    x = "Sea-state class",
+    y = "Proportion present"
+  )
+```
+
+Sea state is not the main question, but it may help explain additional variation and could improve predictive performance when included as a second predictor.
+
+## Figure: raw counts by presence/absence across Beaufort classes
+
+```{r}
+# fig-raw-counts
+ggplot(cape_clean, aes(x = factor(wind_speed_class), fill = cape_petrel_present)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "Cape petrel presence and absence across Beaufort classes",
+    x = "Beaufort wind class",
+    y = "Within-class proportion",
+    fill = "Cape petrel"
+  )
+```
+
+This proportional stacked bar plot gives another view of the same question and helps visualize how the composition of presence/absence changes across wind classes.
+
+# Modeling setup
+
+## Why a binary classification framework?
+
+The outcome has two categories: present and absent. That means classification models are appropriate. To satisfy the assignment, I fit three different model types:
+
+1. Logistic regression
+2. Decision tree 
+3. Random forest
+
+## Train/test split
+
+The test set will only be used once at the very end. Therefore, all model development, tuning, and comparison will happen on the training data only.
+
+```{r}
+# split-data
+data_split <- initial_split(cape_clean, prop = 0.75, strata = cape_petrel_present)
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+tibble(
+  set = c("training", "test"),
+  rows = c(nrow(train_data), nrow(test_data))
+) |>
+  kable(caption = "Train/test split sizes")
+```
+
+## Cross-validation folds
+
+Cross-validation provides a more stable assessment of model performance on the training data than fitting each model only once.
+
+```{r}
+# folds
+cv_folds <- vfold_cv(train_data, v = 5, strata = cape_petrel_present)
+```
+
+# Recipe
+
+```{r}
+# recipe
+cape_recipe <- recipe(cape_petrel_present ~ wind_speed_class + sea_state_class, data = train_data)
+```
+
+# Evaluation metrics
+
+Because this is a classification problem with some class imbalance, I use several complementary metrics:
+
+- ROC, AUC: how well the model separates presence from absence across thresholds
+- Accuracy: overall proportion correctly classified
+- Sensitivity: how well the model detects presence
+- Specificity: how well the model detects absence
+
+```{r}
+# metrics
+class_metrics <- metric_set(roc_auc, accuracy, sens, spec)
+```
+
+# Model 1: Logistic regression
+
+Logistic regression is the most directly interpretable model for this question because it estimates the probability of Cape petrel presence as Beaufort class changes.
+
+```{r}
+# logistic-model
+log_spec <- logistic_reg() |>
+  set_engine("glm") |>
+  set_mode("classification")
+
+log_workflow <- workflow() |>
+  add_recipe(cape_recipe) |>
+  add_model(log_spec)
+```
+
+```{r}
+# logistic-cv
+log_res <- fit_resamples(
+  log_workflow,
+  resamples = cv_folds,
+  metrics = class_metrics,
+  control = control_resamples(save_pred = TRUE)
+)
+
+collect_metrics(log_res) |>
+  kable(caption = "Cross-validated performance for logistic regression")
+```
+
+# Model 2: Decision tree
+
+A decision tree is useful here because it can produce explicit split points in the Beaufort scale.
+
+```{r}
+# tree-model
+tree_spec <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) |>
+  set_engine("rpart") |>
+  set_mode("classification")
+
+tree_workflow <- workflow() |>
+  add_recipe(cape_recipe) |>
+  add_model(tree_spec)
+```
+
+```{r}
+# tree-cv
+tree_grid <- grid_regular(
+  cost_complexity(),
+  tree_depth(range = c(1L, 6L)),
+  min_n(range = c(2L, 30L)),
+  levels = 4
+)
+
+tree_res <- tune_grid(
+  tree_workflow,
+  resamples = cv_folds,
+  grid = tree_grid,
+  metrics = class_metrics,
+  control = control_grid(save_pred = TRUE)
+)
+
+show_best(tree_res, metric = "roc_auc") |>
+  kable(caption = "Top decision-tree settings by cross-validated ROC AUC")
+```
+
+# Model 3: Random forest
+
+Random forest is the most flexible of the three models and may capture nonlinear relationships between Beaufort class, sea state, and Cape petrel presence.
+
+```{r}
+# rf-model
+rf_spec <- rand_forest(
+  mtry = tune(),
+  min_n = tune(),
+  trees = 500
+) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+rf_workflow <- workflow() |>
+  add_recipe(cape_recipe) |>
+  add_model(rf_spec)
+```
+
+```{r}
+# rf-cv
+rf_grid <- grid_regular(
+  mtry(range = c(1L, 2L)),
+  min_n(range = c(2L, 30L)),
+  levels = 6
+)
+
+rf_res <- tune_grid(
+  rf_workflow,
+  resamples = cv_folds,
+  grid = rf_grid,
+  metrics = class_metrics,
+  control = control_grid(save_pred = TRUE)
+)
+
+show_best(rf_res, metric = "roc_auc") |>
+  kable(caption = "Top random-forest settings by cross-validated ROC AUC")
+```
+
+# Compare models using cross-validation
+
+To compare the models fairly, I gather the best-performing version of each model from the training/CV process.
+
+```{r}
+# compare-models
+log_summary <- collect_metrics(log_res) |>
+  filter(.metric == "roc_auc") |>
+  transmute(model = "Logistic regression", mean, std_err)
+
+tree_summary <- show_best(tree_res, metric = "roc_auc", n = 1) |>
+  transmute(model = "Decision tree", mean, std_err)
+
+rf_summary <- show_best(rf_res, metric = "roc_auc", n = 1) |>
+  transmute(model = "Random forest", mean, std_err)
+
+bind_rows(log_summary, tree_summary, rf_summary) |>
+  arrange(desc(mean)) |>
+  mutate(
+    mean = round(mean, 3),
+    std_err = round(std_err, 3)
+  ) |>
+  kable(caption = "Best cross-validated ROC AUC by model type")
+```
+
+## Visual comparison of ROC AUC
+
+```{r}
+# fig-model-comparison
+model_compare_plot <- bind_rows(log_summary, tree_summary, rf_summary)
+
+ggplot(model_compare_plot, aes(x = reorder(model, mean), y = mean)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean - 2 * std_err, ymax = mean + 2 * std_err), width = 0.15) +
+  coord_flip() +
+  labs(
+    title = "Cross-validated model comparison",
+    subtitle = "Points are mean ROC AUC; error bars are approximately ± 2 standard errors",
+    x = NULL,
+    y = "ROC AUC"
+  )
+```
+
+# Choose a final model
+
+I choose **logistic regression** as the final model.
+# Why choose logistic regression?
+
+I choose logistic regression because my question asks about where Cape petrels stop appearing as Beaufort class increases. Logistic regression directly models probability along that gradient.It is easier to interpret. It is less likely to overfit than more flexible models. Finally, at very high wind classes there are very few observations, so a smooth, interpretable model is preferable to a highly flexible one.
+
+# Finalize and fit the selected model on the training data
+
+```{r}
+# finalize-logistic
+final_log_fit <- fit(log_workflow, data = train_data)
+```
+
+# Training-data interpretation: coefficients and odds
+
+To interpret the logistic regression, I inspect the fitted coefficients.
+
+```{r}
+# coefficient-table
+coef_table <- tidy(extract_fit_parsnip(final_log_fit)) |>
+  mutate(odds_ratio = exp(estimate))
+
+coef_table |>
+  mutate(across(c(estimate, std.error, statistic, p.value, odds_ratio), round, 3)) |>
+  kable(caption = "Logistic regression coefficients fit on the training data")
+```
+
+The coefficient table tells us the direction of the association. A negative coefficient for wind_speed_class would mean that the probability of Cape petrel presence decreases as Beaufort class increases, after accounting for sea state.
+
+# Training-data model diagnostics
+
+For classification models, residuals  are less central than in ordinary regression, but I still wanted to how predicted probabilities behave and whether the model captures the overall trend.
+
+## Predicted probability curve on the training data
+
+```{r}
+# train-probability-curve
+train_grid <- crossing(
+  wind_speed_class = seq(min(train_data$wind_speed_class), max(train_data$wind_speed_class), by = 1),
+  sea_state_class = median(train_data$sea_state_class)
+)
+
+train_curve <- train_grid |>
+  bind_cols(
+    predict(final_log_fit, new_data = train_grid, type = "prob")
+  )
+
+ggplot() +
+  geom_point(
+    data = train_data,
+    aes(
+      x = wind_speed_class,
+      y = as.numeric(cape_petrel_present == "present")
+    ),
+    alpha = 0.08,
+    height = 0.02
+  ) +
+  geom_line(
+    data = train_curve,
+    aes(x = wind_speed_class, y = .pred_present),
+    linewidth = 1
+  ) +
+  labs(
+    title = "Logistic-regression probability curve on the training data",
+    subtitle = "Sea state held at its median value for the fitted curve",
+    x = "Beaufort wind class",
+    y = "Predicted probability of Cape petrel presence"
+  )
+```
+
+This figure is useful because it shows the model's estimated probability of Cape petrel presence across the Beaufort scale while keeping sea state fixed. The faint points show the observed binary outcomes, and the line shows the smoothed model-based relationship.
+
+# evaluation on the test set
+
+Now that model selection is complete, I evaluate the chosen model on the  test set.
+
+```{r}
+# test-predictions
+test_predictions <- test_data |>
+  bind_cols(
+    predict(final_log_fit, new_data = test_data),
+    predict(final_log_fit, new_data = test_data, type = "prob")
+  )
+
+test_predictions |>
+  slice_head(n = 5) |>
+  kable(caption = "Example test-set predictions")
+```
+
+# Test-set performance metrics
+
+```{r}
+# test-metrics
+test_predictions |>
+  class_metrics(truth = cape_petrel_present, estimate = .pred_class, .pred_present) |>
+  kable(caption = "Final test-set performance for the selected model")
+```
+
+## Test-set confusion matrix
+
+```{r}
+# test-confmat
+conf_mat(test_predictions, truth = cape_petrel_present, estimate = .pred_class)
+```
+The confusion matrix shows that the model predicts all observations as absence, failing to identify any instances of Cape petrel presence. While the model achieves moderate overall accuracy due to the high number of absence observations, it has zero sensitivity and is therefore not useful for detecting Cape petrels. This suggests either class imbalance or that Beaufort scale and sea state alone are insufficient predictors of presence.
+Therefore, Beaufort scale alone does NOT strongly determine Cape petrel presence.
+
+# Test-set ROC curve
+
+```{r}
+# fig-test-roc
+test_predictions |>
+  roc_curve(truth = cape_petrel_present, .pred_present) |>
+  autoplot() +
+  labs(
+    title = "ROC curve for the final model on the test set",
+    x = "False positive rate",
+    y = "True positive rate"
+  )
+```
+
+These test-set results provides a visual assessment of how well the final model generalizes to unseen data.
+
+# Scientific summary figure
+
+
+```{r}
+# fig-summary
+summary_grid <- crossing(
+  wind_speed_class = seq(min(cape_clean$wind_speed_class), max(cape_clean$wind_speed_class), by = 1),
+  sea_state_class = median(cape_clean$sea_state_class)
+)
+
+summary_curve <- summary_grid |>
+  bind_cols(
+    predict(final_log_fit, new_data = summary_grid, type = "prob")
+  )
+
+ggplot() +
+  geom_point(
+    data = beaufort_presence,
+    aes(x = wind_speed_class, y = prop_present, size = n_records),
+    alpha = 0.7
+  ) +
+  geom_line(
+    data = summary_curve,
+    aes(x = wind_speed_class, y = .pred_present),
+    linewidth = 1
+  ) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Cape petrel presence declines across the Beaufort scale",
+    subtitle = "Points show observed proportions; line shows logistic-regression fitted probabilities",
+    x = "Beaufort wind class",
+    y = "Probability of Cape petrel presence",
+    size = "Number of records"
+  )
+```
+
+This is the main scientific summary figure. It shows both the empirical proportion of count periods with Cape petrels present and the fitted logistic-regression relationship.
+
+# What Beaufort scale appears to mark non-presence?
+
+This question must be answered carefully. With ecological observation data, saying a species is “no longer present” is strong language now that I look back. A better interpretation is might be:
+
+At what Beaufort scale does Cape petrel presence become very unlikely in the available data?
+
+High Beaufort classes have much smaller sample sizes, so a zero count in a class with only one or two observations is not strong evidence of true absence. Therefore, I interpret the results as identifying a range where presence becomes rare rather than a single definitive cutoff guaranteed in nature.
+
+
+## Main takeaway
+
+The main thing learned from this analysis is that Cape petrel presence becomes less likely under some Beaufort conditions, but the exact "disappearance point” must be interpreted with caution because the most extreme Beaufort classes are rare in the dataset. In other words, the data can identify where Cape petrels become uncommon or very unlikely, but they do not support an overly strong claim that a single Beaufort class is a definitive universal threshold for absence.
+
